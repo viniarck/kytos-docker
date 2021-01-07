@@ -23,7 +23,12 @@ if [ $# -eq 0 ] || [[ "$1" =~ ^- ]]; then
   kytosd $@
   tail -f /dev/null
 
-# execute argument
+# execute only argument
+elif [[ "$1" =~ ^/ ]]; then
+  exec "${@}"
+
+# execute argument + kytosd
 else
+  kytosd
   exec "${@}"
 fi
