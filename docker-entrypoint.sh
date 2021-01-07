@@ -5,29 +5,25 @@ usage() {
   echo "docker run amlight/kytos [options]"
   echo "    -h, --help                    display help information"
   echo "    /path/program ARG1 .. ARGn    execute the specfified local program"
-  echo "    --ARG1 .. --ARGn              execute Kytos with these arguments"
+  echo "    --ARG1 .. --ARGn              execute kytos with these arguments"
 }
 
-launch() {
-  # If first argument is an absolute file path then execute that file passing
-  # it the rest of the arguments
-  if [[ $1 =~ ^/ ]]; then
-    exec $@
 
-  # execute kytos with all the arguments
-  else
-    echo "Starting kytos with: kytosd $@"
-    kytosd $@
-    tail -f /dev/null
-  fi
-}
-
-if [ $1 == "-h" -o $1 == "--help" ]; then
+if [ "$1" == "-h" -o "$1" == "--help" ]; then
   usage
   exit 0
 fi
 
-# Start syslog
+# Start the dependency services
 service rsyslog start
 
-launch $@
+# If first argument looks like an argument then execute mininet with all the
+# arguments
+if [ $# -eq 0 ] || [[ "$1" =~ ^- ]]; then
+  kytosd $@
+  tail -f /dev/null
+
+# execute argument
+else
+  exec "${@}"
+fi
