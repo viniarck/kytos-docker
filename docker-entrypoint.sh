@@ -20,15 +20,20 @@ service rsyslog start
 # If first argument looks like an argument then execute mininet with all the
 # arguments
 if [ $# -eq 0 ] || [[ "$1" =~ ^- ]]; then
-  kytosd $@
+  echo -n "Starting Kytos controller with args: "
+  kytosd $@ &
+  echo "done"
+  echo "Leaving tail -f /dev/null running.."
   tail -f /dev/null
 
 # execute only argument
 elif [[ "$1" =~ ^/ ]]; then
-  exec "${@}"
+  exec "$@"
 
 # execute argument + kytosd
 else
-  kytosd
-  exec "${@}"
+  echo -n "Starting Kytos controller: "
+  kytosd &
+  echo "done"
+  exec "$@"
 fi
