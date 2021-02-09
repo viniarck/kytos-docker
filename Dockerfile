@@ -21,8 +21,8 @@ RUN python3 -m pip install -e git+https://github.com/kytos/of_lldp#egg=kytos-of_
 RUN python3 -m pip install -e git+https://github.com/kytos/pathfinder#egg=kytos-pathfinder
 RUN python3 -m pip install -e git+https://github.com/kytos/mef_eline#egg=kytos-mef_eline
 #RUN python3 -m pip install -e git+https://github.com/kytos/maintenance#egg=kytos-maintenance
-RUN python3 -m pip install -e git+https://github.com/amlight/coloring#egg=coloring
-RUN python3 -m pip install -e git+https://github.com/amlight/sdntrace#egg=sdntrace
+#RUN python3 -m pip install -e git+https://github.com/amlight/coloring#egg=coloring
+#RUN python3 -m pip install -e git+https://github.com/amlight/sdntrace#egg=sdntrace
 
 WORKDIR /
 COPY docker-entrypoint.sh /docker-entrypoint.sh
