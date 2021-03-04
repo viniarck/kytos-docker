@@ -20,7 +20,7 @@ RUN python3 -m pip install -e git+https://github.com/kytos/topology#egg=kytos-to
 RUN python3 -m pip install -e git+https://github.com/kytos/of_lldp#egg=kytos-of_lldp
 RUN python3 -m pip install -e git+https://github.com/kytos/pathfinder#egg=kytos-pathfinder
 RUN python3 -m pip install -e git+https://github.com/kytos/mef_eline#egg=kytos-mef_eline
-#RUN python3 -m pip install -e git+https://github.com/kytos/maintenance#egg=kytos-maintenance
+RUN python3 -m pip install -e git+https://github.com/kytos/maintenance#egg=kytos-maintenance
 RUN python3 -m pip install -e git+https://github.com/amlight/coloring#egg=amlight-coloring
 RUN python3 -m pip install -e git+https://github.com/amlight/sdntrace#egg=amlight-sdntrace
 
