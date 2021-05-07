@@ -1,0 +1,98 @@
+From dcf43582f094700f33acb77eaeebcf60be546ea0 Mon Sep 17 00:00:00 2001
+From: Antonio Francisco <ajoaoff@gmail.com>
+Date: Mon, 3 May 2021 11:43:24 -0300
+Subject: [PATCH] Check state before deleting or modifying
+
+Do not delete or modify a maintenace while it is
+ running. Running maintenances can only be ended.
+ Fix #36
+---
+ main.py                 |  8 +++++++-
+ tests/unit/test_main.py | 24 +++++++++++++++++++++++-
+ 2 files changed, 30 insertions(+), 2 deletions(-)
+
+diff --git a/main.py b/main.py
+index ce829e7..acb2618 100644
+--- a/main.py
++++ b/main.py
+@@ -10,7 +10,7 @@
+ 
+ from kytos.core import KytosNApp, rest
+ from napps.kytos.maintenance.models import MaintenanceWindow as MW
+-from napps.kytos.maintenance.models import Scheduler
++from napps.kytos.maintenance.models import Scheduler, Status
+ 
+ 
+ class Main(KytosNApp):
+@@ -90,6 +90,9 @@ def update_mw(self, mw_id):
+         except KeyError:
+             return jsonify({'response': f'Maintenance with id {mw_id} not '
+                                         f'found'}), 404
++        if maintenance.status == Status.RUNNING:
++            return jsonify({'response': f'Updating a running maintenance is '
++                                        f'not allowed'}), 400
+         try:
+             maintenance.update(data)
+         except ValueError as error:
+@@ -104,6 +107,9 @@ def remove_mw(self, mw_id):
+         except KeyError:
+             return jsonify({'response': f'Maintenance with id {mw_id} not '
+                                         f'found'}), 404
++        if maintenance.status == Status.RUNNING:
++            return jsonify({'response': f'Deleting a running maintenance is '
++                                        f'not allowed'}), 400
+         self.scheduler.remove(maintenance)
+         del self.maintenances[mw_id]
+         return jsonify({'response': f'Maintenance with id {mw_id} '
+diff --git a/tests/unit/test_main.py b/tests/unit/test_main.py
+index 606edf2..c709ab0 100644
+--- a/tests/unit/test_main.py
++++ b/tests/unit/test_main.py
+@@ -10,6 +10,7 @@
+ from tests.helpers import get_controller_mock
+ from napps.kytos.maintenance.main import Main
+ from napps.kytos.maintenance.models import MaintenanceWindow as MW
++from napps.kytos.maintenance.models import Status
+ 
+ TIME_FMT = "%Y-%m-%dT%H:%M:%S"
+ 
+@@ -296,7 +297,7 @@ def test_remove_mw_case_1(self):
+     @patch('napps.kytos.maintenance.models.Scheduler.remove')
+     def test_remove_mw_case_2(self, sched_remove_mock):
+         """Test remove existent id."""
+-        start1 = datetime.now(pytz.utc) + timedelta(days=1)
++        start1 = datetime.now(pytz.utc) + timedelta(hours=1)
+         end1 = start1 + timedelta(hours=6)
+         start2 = datetime.now(pytz.utc) + timedelta(hours=5)
+         end2 = start2 + timedelta(hours=1, minutes=30)
+@@ -314,9 +315,30 @@ def test_remove_mw_case_2(self, sched_remove_mock):
+         self.assertEqual(response.status_code, 200)
+         self.assertEqual(current_data, {'response': 'Maintenance with id 1234 '
+                                                     'successfully removed'})
++
+         sched_remove_mock.assert_called_once()
+         self.assertEqual(len(self.napp.maintenances), 1)
+ 
++    def test_remove_mw_case_3(self):
++        """Test remove existent id."""
++        start1 = datetime.now(pytz.utc) - timedelta(days=1)
++        end1 = start1 + timedelta(hours=6)
++        start2 = datetime.now(pytz.utc) + timedelta(hours=5)
++        end2 = start2 + timedelta(hours=1, minutes=30)
++        self.napp.maintenances = {
++            '1234': MW(start1, end1, self.controller, status=Status.RUNNING,
++                       items=['00:00:00:00:00:00:12:23']),
++            '4567': MW(start2, end2, self.controller, items=[
++                '12:34:56:78:90:ab:cd:ef'
++            ])
++        }
++        url = f'{self.server_name_url}/1234'
++        response = self.api.delete(url)
++        current_data = json.loads(response.data)
++        self.assertEqual(response.status_code, 400)
++        self.assertEqual(current_data, {'response': 'Deleting a running mainte'
++                                                    'nance is not allowed'})
++
+     def test_update_mw_case_1(self):
+         """Test update non-existent id."""
+         start1 = datetime.now(pytz.utc) + timedelta(days=1)

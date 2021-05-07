@@ -1,0 +1,51 @@
+From e0079c3ce8c11b3969cc8f0f6488bb21d478fc16 Mon Sep 17 00:00:00 2001
+From: Italo Valcy <italo@ampath.net>
+Date: Mon, 3 May 2021 15:49:14 -0400
+Subject: [PATCH] Fix vuejs conditional table for list EVCs, fix URL path for
+ creating an EVC and dynamic_backup_path/enabled to params
+
+---
+ ui/k-info-panel/list_connections.kytos | 2 +-
+ ui/k-toolbar/main.kytos                | 6 ++++--
+ 2 files changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/ui/k-info-panel/list_connections.kytos b/ui/k-info-panel/list_connections.kytos
+index a28d65b..634aefc 100644
+--- a/ui/k-info-panel/list_connections.kytos
++++ b/ui/k-info-panel/list_connections.kytos
+@@ -1,5 +1,5 @@
+ <template>
+-    <k-table v-if="this.emptyTable" title="List of EVCs"
++    <k-table v-if="this.rows.length" title="List of EVCs"
+         :headers="this.headers"
+         :rows="this.rows">
+     </k-table>
+diff --git a/ui/k-toolbar/main.kytos b/ui/k-toolbar/main.kytos
+index 1a7692b..4da5d7f 100644
+--- a/ui/k-toolbar/main.kytos
++++ b/ui/k-toolbar/main.kytos
+@@ -94,6 +94,8 @@ module.exports = {
+     request_circuit () {
+         var request = {
+             "name" : this.circuit_name,
++            "dynamic_backup_path": true,
++            "enabled": true,
+             "uni_a": {"interface_id": this.endpoint_a},
+             "uni_z": {"interface_id": this.endpoint_z}
+         }
+@@ -108,7 +110,7 @@ module.exports = {
+         }
+         
+         let circuit_request = $.ajax({
+-                                url: this.url,
++                                url: this.$kytos_server_api + "kytos/mef_eline/v2/evc/",
+                                 type:"POST",
+                                 data: JSON.stringify(request),
+                                 dataType: "json",
+@@ -120,4 +122,4 @@ module.exports = {
+     }
+   }
+ }
+-</script>
+\ No newline at end of file
++</script>

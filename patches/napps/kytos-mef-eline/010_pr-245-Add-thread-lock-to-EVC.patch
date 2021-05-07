@@ -1,0 +1,91 @@
+From 1eef29923f6040af263caa95e10aa0284e7ba24d Mon Sep 17 00:00:00 2001
+From: Antonio Francisco <ajoaoff@gmail.com>
+Date: Tue, 27 Apr 2021 13:11:34 -0300
+Subject: [PATCH 1/2] Add a lock to the EVC
+
+The lock makes the handle of link up/down atomic,
+so the method does not start with the EVC in a state and
+that state changes while it is processing.
+Fix #240
+---
+ main.py   | 10 ++++++----
+ models.py |  3 +++
+ 2 files changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/main.py b/main.py
+index 521beb3..a302dbb 100644
+--- a/main.py
++++ b/main.py
+@@ -472,16 +472,18 @@ def handle_link_up(self, event):
+         log.debug("Event handle_link_up %s", event)
+         for evc in self.circuits.values():
+             if evc.is_enabled() and not evc.archived:
+-                evc.handle_link_up(event.content['link'])
++                with evc.lock:
++                    evc.handle_link_up(event.content['link'])
+ 
+     @listen_to('kytos/topology.link_down')
+     def handle_link_down(self, event):
+         """Change circuit when link is down or under_mantenance."""
+         log.debug("Event handle_link_down %s", event)
+         for evc in self.circuits.values():
+-            if evc.is_affected_by_link(event.content['link']):
+-                log.info('handling evc %s' % evc)
+-                evc.handle_link_down()
++            with evc.lock:
++                if evc.is_affected_by_link(event.content['link']):
++                    log.info('handling evc %s' % evc)
++                    evc.handle_link_down()
+ 
+     def load_circuits_by_interface(self, circuits):
+         """Load circuits in storehouse for in-memory dictionary."""
+diff --git a/models.py b/models.py
+index 658e1a2..cd79afc 100644
+--- a/models.py
++++ b/models.py
+@@ -1,5 +1,6 @@
+ """Classes used in the main application."""
+ from datetime import datetime
++from threading import Lock
+ from uuid import uuid4
+ 
+ import requests
+@@ -221,6 +222,8 @@ def __init__(self, controller, **kwargs):
+         self.primary_links_cache = set()
+         self.backup_links_cache = set()
+ 
++        self.lock = Lock()
++
+         self.archived = kwargs.get('archived', False)
+ 
+         self._storehouse = StoreHouse(controller)
+
+From 8f25ce18e678301c8098bcf3a0c363b0fa66e9bd Mon Sep 17 00:00:00 2001
+From: Antonio Francisco <ajoaoff@gmail.com>
+Date: Tue, 27 Apr 2021 14:44:26 -0300
+Subject: [PATCH 2/2] Fix some errors in tests
+
+---
+ tests/unit/test_main.py | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/tests/unit/test_main.py b/tests/unit/test_main.py
+index ba25fc2..f598a13 100644
+--- a/tests/unit/test_main.py
++++ b/tests/unit/test_main.py
+@@ -1397,6 +1397,7 @@ def test_handle_link_up(self):
+         """Test handle_link_up method."""
+         evc_mock = create_autospec(EVC)
+         evc_mock.is_enabled = MagicMock(side_effect=[True, False, True])
++        evc_mock.lock = MagicMock()
+         type(evc_mock).archived = \
+             PropertyMock(side_effect=[True, False, False])
+         evcs = [evc_mock, evc_mock, evc_mock]
+@@ -1410,6 +1411,7 @@ def test_handle_link_down(self):
+         evc_mock = create_autospec(EVC)
+         evc_mock.is_affected_by_link = \
+             MagicMock(side_effect=[True, False, True])
++        evc_mock.lock = MagicMock()
+         evcs = [evc_mock, evc_mock, evc_mock]
+         event = KytosEvent(name='test', content={'link': 'abc'})
+         self.napp.circuits = dict(zip(['1', '2', '3'], evcs))

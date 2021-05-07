@@ -1,0 +1,37 @@
+From a0a45cb9732f02b1f57d031c9eab9cbc855288da Mon Sep 17 00:00:00 2001
+From: Italo Valcy <italo@ampath.net>
+Date: Sat, 24 Apr 2021 21:44:23 -0400
+Subject: [PATCH] avoid recreating flows for a connected switch when
+ consistency check is enabled
+
+---
+ main.py                 | 3 +++
+ tests/unit/test_main.py | 1 +
+ 2 files changed, 4 insertions(+)
+
+diff --git a/main.py b/main.py
+index c737f85..5f7aac3 100644
+--- a/main.py
++++ b/main.py
+@@ -57,6 +57,9 @@ def shutdown(self):
+     @listen_to('kytos/of_core.handshake.completed')
+     def resend_stored_flows(self, event):
+         """Resend stored Flows."""
++        # if consistency check is enabled, it should take care of this
++        if CONSISTENCY_INTERVAL >= 0:
++            return
+         switch = event.content['switch']
+         dpid = str(switch.dpid)
+         # This can be a problem because this code is running a thread
+diff --git a/tests/unit/test_main.py b/tests/unit/test_main.py
+index 78e160b..db488da 100644
+--- a/tests/unit/test_main.py
++++ b/tests/unit/test_main.py
+@@ -232,6 +232,7 @@ def test_load_flows(self, mock_storehouse):
+         self.napp._load_flows()
+         mock_storehouse.assert_called()
+ 
++    @patch("napps.kytos.flow_manager.main.CONSISTENCY_INTERVAL", -1)
+     @patch("napps.kytos.flow_manager.main.Main._install_flows")
+     def test_resend_stored_flows(self, mock_install_flows):
+         """Test resend stored flows."""

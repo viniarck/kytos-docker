@@ -16,6 +16,7 @@ fi
 
 # Start the dependency services
 service rsyslog start
+service openvswitch-switch start
 
 # If first argument looks like an argument then execute mininet with all the
 # arguments

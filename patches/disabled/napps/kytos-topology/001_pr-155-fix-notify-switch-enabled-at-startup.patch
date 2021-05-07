@@ -1,0 +1,60 @@
+From 5b19d720d0edb47a429f8c46832be6ae475017c5 Mon Sep 17 00:00:00 2001
+From: Carlos Magno <cmagnobarbosa@gmail.com>
+Date: Tue, 2 Feb 2021 11:39:24 -0300
+Subject: [PATCH 1/2] Add event to notify if the `Switch` is enabled at startup
+
+Running Kytos with the flag `-E` all switches are enabled at startup,
+this commit adds an event to notify when this occurs.
+
+Fixes https://github.com/kytos/topology/issues/154
+Fixes https://github.com/kytos/of_lldp/issues/60
+---
+ main.py | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/main.py b/main.py
+index d2eb489..d9af3e2 100644
+--- a/main.py
++++ b/main.py
+@@ -503,7 +503,7 @@ def handle_new_switch(self, event):
+         """Create a new Device on the Topology.
+
+         Handle the event of a new created switch and update the topology with
+-        this new device.
++        this new device. Also notify if the switch is enabled.
+         """
+         switch = event.content['switch']
+         switch.activate()
+@@ -511,6 +511,8 @@ def handle_new_switch(self, event):
+         self.notify_topology_update()
+         self.update_instance_metadata(switch)
+         self.restore_network_status(switch)
++        if switch.is_enabled:
++            self.notify_switch_enabled(switch.id)
+
+     @listen_to('.*.connection.lost')
+     def handle_connection_lost(self, event):
+
+From 5ee2fc453db38327c802b16b33511ef4c8f5b9be Mon Sep 17 00:00:00 2001
+From: Carlos Magno <cmagnobarbosa@gmail.com>
+Date: Tue, 2 Feb 2021 15:23:33 -0300
+Subject: [PATCH 2/2] Apply suggestions from code review
+
+Co-authored-by: Antonio Francisco <antonio@ansp.br>
+---
+ main.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/main.py b/main.py
+index d9af3e2..692028e 100644
+--- a/main.py
++++ b/main.py
+@@ -511,7 +511,7 @@ def handle_new_switch(self, event):
+         self.notify_topology_update()
+         self.update_instance_metadata(switch)
+         self.restore_network_status(switch)
+-        if switch.is_enabled:
++        if switch.is_enabled():
+             self.notify_switch_enabled(switch.id)
+
+     @listen_to('.*.connection.lost')

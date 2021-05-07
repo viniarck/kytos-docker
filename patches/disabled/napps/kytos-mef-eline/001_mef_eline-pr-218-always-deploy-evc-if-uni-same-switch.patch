@@ -1,0 +1,202 @@
+From 960717a203a2b57d76185ed07d12c1cd41920b34 Mon Sep 17 00:00:00 2001
+From: Antonio Francisco <ajoaoff@gmail.com>
+Date: Tue, 24 Nov 2020 14:47:49 -0300
+Subject: [PATCH 1/3] Always deploy EVC if UNIs are in the same switch
+
+---
+ models.py | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/models.py b/models.py
+index eef87b7..f1fee58 100644
+--- a/models.py
++++ b/models.py
+@@ -453,7 +453,8 @@ def deploy_to_backup_path(self):
+         if success:
+             return True
+
+-        if self.dynamic_backup_path:
++        if self.dynamic_backup_path or \
++           self.uni_a.interface.switch == self.uni_z.interface.switch:
+             return self.deploy_to_path()
+
+         return False
+
+From 3cc43a40ebfbcb8b00a0b1691dd9902432b9fed1 Mon Sep 17 00:00:00 2001
+From: Antonio Francisco <ajoaoff@gmail.com>
+Date: Mon, 30 Nov 2020 14:55:48 -0300
+Subject: [PATCH 2/3] Test the change
+
+---
+ tests/unit/models/test_evc_deploy.py | 38 +++++++++++++++++++++++++++-
+ 1 file changed, 37 insertions(+), 1 deletion(-)
+
+diff --git a/tests/unit/models/test_evc_deploy.py b/tests/unit/models/test_evc_deploy.py
+index 0661ee8..71c36d2 100644
+--- a/tests/unit/models/test_evc_deploy.py
++++ b/tests/unit/models/test_evc_deploy.py
+@@ -472,6 +472,42 @@ def test_deploy_fail(self, *args):
+         self.assertEqual(sync_mock.call_count, 1)
+         self.assertFalse(deployed)
+
++    @patch('napps.kytos.mef_eline.models.EVC.deploy_to_path')
++    @patch('napps.kytos.mef_eline.models.EVC.discover_new_paths')
++    def test_deploy_to_backup_path1(self, discover_new_paths_mocked,
++                                    deploy_to_path_mocked):
++        """Test deployment when dynamic_backup_path is False in same switch"""
++        uni_a = get_uni_mocked(interface_port=2, tag_value=82,
++                               is_valid=True)
++        uni_z = get_uni_mocked(interface_port=3, tag_value=83,
++                               is_valid=True)
++
++        switch = Mock(spec=Switch)
++        uni_a.interface.switch = switch
++        uni_z.interface.switch = switch
++
++        attributes = {
++            "controller": get_controller_mock(),
++            "name": "custom_name",
++            "uni_a": uni_a,
++            "uni_z": uni_z,
++            "enabled": True,
++            "dynamic_backup_path": False
++        }
++
++        evc = EVC(**attributes)
++        discover_new_paths_mocked.return_value = []
++        deploy_to_path_mocked.return_value = True
++
++        # storehouse initialization mock
++        evc._storehouse.box = Mock()  # pylint: disable=protected-access
++        evc._storehouse.box.data = {}  # pylint: disable=protected-access
++
++        deployed = evc.deploy_to_backup_path()
++
++        deploy_to_path_mocked.assert_called_once_with()
++        self.assertEqual(deployed, True)
++
+     @patch('requests.post')
+     @patch('napps.kytos.mef_eline.models.log')
+     @patch('napps.kytos.mef_eline.models.Path.choose_vlans')
+@@ -499,7 +535,7 @@ def test_deploy_without_path_case1(self, *args):
+             "uni_a": uni_a,
+             "uni_z": uni_z,
+             "enabled": True,
+-            "dynamic_backup_path": True
++            "dynamic_backup_path": False
+         }
+
+         dynamic_backup_path = Path([
+
+From 8e9fdb9cd7cd1dc5a87f77dc0da9353e842814d2 Mon Sep 17 00:00:00 2001
+From: Antonio Francisco <ajoaoff@gmail.com>
+Date: Mon, 30 Nov 2020 14:56:17 -0300
+Subject: [PATCH 3/3] Change tests to reflect the use of the 'switch' in deploy
+ method
+
+---
+ tests/unit/test_main.py | 45 ++++++++++++++++++++++++++---------------
+ 1 file changed, 29 insertions(+), 16 deletions(-)
+
+diff --git a/tests/unit/test_main.py b/tests/unit/test_main.py
+index 8439792..2940dc3 100644
+--- a/tests/unit/test_main.py
++++ b/tests/unit/test_main.py
+@@ -310,12 +310,19 @@ def test_circuit_with_invalid_id(self, storehouse_data_mock):
+     @patch('napps.kytos.mef_eline.models.EVC._validate')
+     def test_create_a_circuit_case_1(self, *args):
+         """Test create a new circuit."""
++        # pylint: disable=too-many-locals
+         (validate_mock, evc_as_dict_mock, save_evc_mock,
+          uni_from_dict_mock, sched_add_mock, storehouse_data_mock) = args
+
+         validate_mock.return_value = True
+         save_evc_mock.return_value = True
+-        uni_from_dict_mock.side_effect = ['uni_a', 'uni_z']
++        uni1 = create_autospec(UNI)
++        uni2 = create_autospec(UNI)
++        uni1.interface = create_autospec(Interface)
++        uni2.interface = create_autospec(Interface)
++        uni1.interface.switch = '00:00:00:00:00:00:00:01'
++        uni2.interface.switch = '00:00:00:00:00:00:00:02'
++        uni_from_dict_mock.side_effect = [uni1, uni2]
+         evc_as_dict_mock.return_value = {}
+         sched_add_mock.return_value = True
+         storehouse_data_mock.return_value = {}
+@@ -358,8 +365,8 @@ def test_create_a_circuit_case_1(self, *args):
+         validate_mock.assert_called_once()
+         validate_mock.assert_called_with(frequency='* * * * *',
+                                          name='my evc1',
+-                                         uni_a='uni_a',
+-                                         uni_z='uni_z')
++                                         uni_a=uni1,
++                                         uni_z=uni2)
+         # verify save method is called
+         save_evc_mock.assert_called_once()
+
+@@ -424,11 +431,16 @@ def test_create_circuit_already_enabled(self, *args):
+         validate_mock.return_value = True
+         save_evc_mock.return_value = True
+         sched_add_mock.return_value = True
+-        uni_from_dict_mock.side_effect = ['uni_a', 'uni_z', 'uni_a', 'uni_z']
+-        payload1 = {'name': 'circuit_1'}
++        uni1 = create_autospec(UNI)
++        uni2 = create_autospec(UNI)
++        uni1.interface = create_autospec(Interface)
++        uni2.interface = create_autospec(Interface)
++        uni1.interface.switch = '00:00:00:00:00:00:00:01'
++        uni2.interface.switch = '00:00:00:00:00:00:00:02'
++        uni_from_dict_mock.side_effect = [uni1, uni2, uni1, uni2]
+
+         api = self.get_app_test_client(self.napp)
+-        payload2 = {
++        payload = {
+             "name": "my evc1",
+             "uni_a": {
+                 "interface_id": "00:00:00:00:00:00:00:01:1",
+@@ -446,20 +458,14 @@ def test_create_circuit_already_enabled(self, *args):
+             }
+         }
+
+-        evc_as_dict_mock.return_value = payload1
+-        response = api.post(f'{self.server_name_url}/v2/evc/',
+-                            data=json.dumps(payload1),
+-                            content_type='application/json')
+-        self.assertEqual(201, response.status_code)
+-
+-        evc_as_dict_mock.return_value = payload2
++        evc_as_dict_mock.return_value = payload
+         response = api.post(f'{self.server_name_url}/v2/evc/',
+-                            data=json.dumps(payload2),
++                            data=json.dumps(payload),
+                             content_type='application/json')
+         self.assertEqual(201, response.status_code)
+
+         response = api.post(f'{self.server_name_url}/v2/evc/',
+-                            data=json.dumps(payload2),
++                            data=json.dumps(payload),
+                             content_type='application/json')
+         current_data = json.loads(response.data)
+         expected_data = 'The EVC already exists.'
+@@ -1210,13 +1216,20 @@ def test_update_circuit(self, *args):
+     @patch('napps.kytos.mef_eline.main.EVC.as_dict')
+     def test_update_circuit_invalid_json(self, *args):
+         """Test update a circuit circuit."""
++        # pylint: disable=too-many-locals
+         (evc_as_dict_mock, validate_mock, save_evc_mock,
+          uni_from_dict_mock, sched_add_mock) = args
+
+         validate_mock.return_value = True
+         save_evc_mock.return_value = True
+         sched_add_mock.return_value = True
+-        uni_from_dict_mock.side_effect = ['uni_a', 'uni_z', 'uni_a', 'uni_z']
++        uni1 = create_autospec(UNI)
++        uni2 = create_autospec(UNI)
++        uni1.interface = create_autospec(Interface)
++        uni2.interface = create_autospec(Interface)
++        uni1.interface.switch = '00:00:00:00:00:00:00:01'
++        uni2.interface.switch = '00:00:00:00:00:00:00:02'
++        uni_from_dict_mock.side_effect = [uni1, uni2, uni1, uni2]
+
+         api = self.get_app_test_client(self.napp)
+         payload1 = {

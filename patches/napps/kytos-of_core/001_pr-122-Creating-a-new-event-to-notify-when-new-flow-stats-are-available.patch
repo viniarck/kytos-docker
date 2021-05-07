@@ -1,0 +1,83 @@
+From e7212eb57266b57fca7c2b4a300ad18a8a08779c Mon Sep 17 00:00:00 2001
+From: Italo Valcy <italo@ampath.net>
+Date: Sat, 24 Apr 2021 21:12:35 -0400
+Subject: [PATCH] creating new event kytos/of_core.flow_stats.received to
+ notify when the flow_stats is received
+
+---
+ main.py                 | 18 ++++++++++++++++++
+ tests/unit/test_main.py | 18 ++++++++++++++++++
+ 2 files changed, 36 insertions(+)
+
+diff --git a/main.py b/main.py
+index db0d5f3..2479f64 100644
+--- a/main.py
++++ b/main.py
+@@ -82,6 +82,10 @@ def handle_stats_reply(self, event):
+         if msg.body_type == StatsType.OFPST_FLOW:
+             switch.flows = [Flow01.from_of_flow_stats(f, switch)
+                             for f in msg.body]
++            event_raw = KytosEvent(
++                name='kytos/of_core.flow_stats.received',
++                content={'switch': switch})
++            self.controller.buffers.app.put(event_raw)
+         elif msg.body_type == StatsType.OFPST_PORT:
+             port_stats = [of_port_stats for of_port_stats in msg.body]
+             port_stats_event = KytosEvent(
+@@ -121,6 +125,16 @@ def handle_features_reply(self, event):
+                 content={'switch': switch})
+             self.controller.buffers.app.put(event_raw)
+ 
++    @listen_to('kytos/of_core.handshake.completed')
++    def on_handshake_completed_request_flow_list(self, event):
++        """Request an flow list right after the handshake is completed.
++
++        Args:
++            event (KytosEvent): Event with the switch' handshake completed
++        """
++        switch = event.content['switch']
++        self._request_flow_list(switch)
++
+     @listen_to('kytos/of_core.v0x04.messages.in.ofpt_multipart_reply')
+     def handle_multipart_reply(self, event):
+         """Handle multipart replies for v0x04 switches.
+@@ -170,6 +184,10 @@ def _update_switch_flows(self, switch):
+         switch.flows = self._multipart_replies_flows[switch.id]
+         del self._multipart_replies_flows[switch.id]
+         del self._multipart_replies_xids[switch.id]['flows']
++        event_raw = KytosEvent(
++            name='kytos/of_core.flow_stats.received',
++            content={'switch': switch})
++        self.controller.buffers.app.put(event_raw)
+ 
+     def _new_port_stats(self, switch):
+         """Send an event with the new port stats and clean resources."""
+diff --git a/tests/unit/test_main.py b/tests/unit/test_main.py
+index 19c39e2..030aaeb 100644
+--- a/tests/unit/test_main.py
++++ b/tests/unit/test_main.py
+@@ -64,6 +64,24 @@ def test_request_flow_list(self, *args):
+         mock_update_flow_list_v0x04.assert_called_with(self.napp.controller,
+                                                        self.switch_v0x04)
+ 
++    @patch('napps.kytos.of_core.v0x04.utils.update_flow_list')
++    @patch('napps.kytos.of_core.v0x01.utils.update_flow_list')
++    def test_on_handshake_completed_request_flow_list(self, *args):
++        """Test request flow list."""
++        (mock_update_flow_list_v0x01, mock_update_flow_list_v0x04) = args
++        mock_update_flow_list_v0x04.return_value = "ABC"
++        name = 'kytos/of_core.handshake.completed'
++        content = {"switch": self.switch_v0x01}
++        event = get_kytos_event_mock(name=name, content=content)
++        self.napp.on_handshake_completed_request_flow_list(event)
++        mock_update_flow_list_v0x01.assert_called_with(self.napp.controller,
++                                                       self.switch_v0x01)
++        content = {"switch": self.switch_v0x04}
++        event = get_kytos_event_mock(name=name, content=content)
++        self.napp.on_handshake_completed_request_flow_list(event)
++        mock_update_flow_list_v0x04.assert_called_with(self.napp.controller,
++                                                       self.switch_v0x04)
++
+     @patch('napps.kytos.of_core.v0x01.flow.Flow.from_of_flow_stats')
+     def test_handle_stats_reply(self, mock_from_of_flow_stats_v0x01):
+         """Test handle stats reply."""

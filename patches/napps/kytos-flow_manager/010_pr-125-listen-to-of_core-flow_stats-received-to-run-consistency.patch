@@ -1,0 +1,48 @@
+From b5e7e64f43d60d7f0bca392a397fef37bb704dd0 Mon Sep 17 00:00:00 2001
+From: Italo Valcy <italo@ampath.net>
+Date: Sat, 24 Apr 2021 21:25:48 -0400
+Subject: [PATCH] adding listening to kytos/of_core.flow_stats.received to run
+ consistency check
+
+---
+ main.py     | 11 +++++++++++
+ settings.py |  7 ++++++-
+ 2 files changed, 17 insertions(+), 1 deletion(-)
+
+diff --git a/main.py b/main.py
+index c737f85..99e6f3a 100644
+--- a/main.py
++++ b/main.py
+@@ -72,6 +72,17 @@ def resend_stored_flows(self, event):
+             self.resent_flows.add(dpid)
+             log.info(f'Flows resent to Switch {dpid}')
+ 
++    @listen_to('kytos/of_core.flow_stats.received')
++    def on_flow_stats_check_consistency(self, event):
++        """Check the consistency of a switch upon receiving flow stats."""
++        if CONSISTENCY_INTERVAL != 0:
++            return
++        switch = event.content['switch']
++        if switch.is_enabled():
++            self.check_storehouse_consistency(switch)
++            if switch.dpid in self.stored_flows:
++                self.check_switch_consistency(switch)
++
+     def consistency_check(self):
+         """Check the consistency of flows in each switch."""
+         switches = self.controller.switches.values()
+diff --git a/settings.py b/settings.py
+index 11bc877..f6e92b7 100644
+--- a/settings.py
++++ b/settings.py
+@@ -4,4 +4,9 @@
+ FLOWS_DICT_MAX_SIZE = 10000
+ # Time (in seconds) to wait retrieve box from storehouse
+ BOX_RESTORE_TIMER = 0.1
+-CONSISTENCY_INTERVAL = 60
++# CONSISTENCY_INTERVAL defines the strategy and interval
++# to run the consistency check
++#  CONSISTENCY_INTERVAL = 0 --> run based on the flow_stats.received event
++#  CONSISTENCY_INTERVAL < 0 --> disables consistency check
++#  CONSISTENCY_INTERVAL > 0 --> run periodically based on the interval
++CONSISTENCY_INTERVAL = 0

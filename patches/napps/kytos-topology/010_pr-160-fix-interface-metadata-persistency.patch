@@ -1,0 +1,71 @@
+From 53d710bccf4f4dc5010d89d4a98d867c1d862935 Mon Sep 17 00:00:00 2001
+From: Carlos Magno <cmagnobarbosa@gmail.com>
+Date: Thu, 18 Mar 2021 09:56:19 -0300
+Subject: [PATCH] Add a listening to update the interface metadata when a port
+ is created
+
+Add to `handle_interface_created` method a listen for the `port_ created` event,
+allowing update the interface metadata when a new port is created.
+---
+ main.py                 | 24 ++++++++++++++++++++----
+ tests/unit/test_main.py |  2 +-
+ 2 files changed, 21 insertions(+), 5 deletions(-)
+
+diff --git a/main.py b/main.py
+index 96229b7..b0cee85 100644
+--- a/main.py
++++ b/main.py
+@@ -530,20 +530,36 @@ def handle_connection_lost(self, event):
+             log.debug('Switch %s removed from the Topology.', switch.id)
+             self.notify_topology_update()
+ 
+-    def handle_interface_up(self, event):
++    def handle_interface_up(self, interface):
+         """Update the topology based on a Port Modify event.
+ 
+         The event notifies that an interface was changed to 'up'.
+         """
+-        interface = event.content['interface']
+         interface.activate()
+         self.notify_topology_update()
+         self.update_instance_metadata(interface)
+ 
+-    @listen_to('.*.switch.interface.created')
++    # @listen_to('.*.switch.port.created')
++    # def handle_port_created(self, event):
++    #     """Update a interface metadata when a port is created.
++    #     Handle Port created Event.
++    #     """
++    #     dpid = event.content['switch']
++    #     port = event.content['port']
++    #     switch = self.controller.get_switch_by_dpid(dpid)
++    #     interface = switch.interfaces[port]
++    #     self.update_instance_metadata(interface)
++
++    @listen_to('.*.switch.(interface|port).created')
+     def handle_interface_created(self, event):
+         """Update the topology based on a Port Create event."""
+-        self.handle_interface_up(event)
++        interface = event.content.get('interface')
++        if not interface:
++            dpid = event.content['switch']
++            port = event.content['port']
++            switch = self.controller.get_switch_by_dpid(dpid)
++            interface = switch.interfaces[port]
++        self.handle_interface_up(interface)
+ 
+     def handle_interface_down(self, event):
+         """Update the topology based on a Port Modify event.
+diff --git a/tests/unit/test_main.py b/tests/unit/test_main.py
+index 2e65036..5d2e798 100644
+--- a/tests/unit/test_main.py
++++ b/tests/unit/test_main.py
+@@ -44,7 +44,7 @@ def test_get_event_listeners(self):
+                            '.*.network_status.updated',
+                            '.*.interface.is.nni',
+                            '.*.connection.lost',
+-                           '.*.switch.interface.created',
++                           '.*.switch.(interface|port).created',
+                            '.*.switch.interface.deleted',
+                            '.*.switch.interface.link_down',
+                            '.*.switch.interface.link_up',
