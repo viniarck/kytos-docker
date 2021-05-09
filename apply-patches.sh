@@ -7,9 +7,11 @@ if [ -z $PATCH_BIN ]; then
 fi
 
 ORIG_DIR=$(pwd)
-KYTOS_DIR=$(python3 -m pip show kytos | grep Location | awk '{print $NF"/kytos"}')
+KYTOS_DIR=$(python3 -m pip show kytos | grep Location | awk '{print $NF}')
 cd $KYTOS_DIR
+echo kytos
 for PATCH in $(ls -1 $ORIG_DIR/patches/kytos/); do
+	echo $PATCH
 	$PATCH_BIN -p1 < $ORIG_DIR/patches/kytos/$PATCH
 done
 cd $ORIG_DIR

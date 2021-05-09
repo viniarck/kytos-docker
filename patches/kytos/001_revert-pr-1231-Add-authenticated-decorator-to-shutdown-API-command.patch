@@ -1,0 +1,91 @@
+diff --git a/kytos/core/api_server.py b/kytos/core/api_server.py
+index a18e15e..00a19e3 100644
+--- a/kytos/core/api_server.py
++++ b/kytos/core/api_server.py
+@@ -12,7 +12,7 @@ from http import HTTPStatus
+ from urllib.error import HTTPError, URLError
+ from urllib.request import urlopen, urlretrieve
+ 
+-from flask import Blueprint, Flask, jsonify, send_file
++from flask import Blueprint, Flask, jsonify, request, send_file
+ from flask_cors import CORS
+ from flask_socketio import SocketIO, join_room, leave_room
+ from werkzeug.exceptions import HTTPException
+@@ -153,13 +153,17 @@ class APIServer:
+         except URLError:
+             pass
+ 
+-    @authenticated
+     def shutdown_api(self):
+         """Handle shutdown requests received by Api Server.
+ 
+         This method must be called by kytos using the method
+         stop_api_server, otherwise this request will be ignored.
+         """
++        allowed_host = ['127.0.0.1:'+str(self.port),
++                        'localhost:'+str(self.port)]
++        if request.host not in allowed_host:
++            return "", HTTPStatus.FORBIDDEN.value
++
+         self.server.stop()
+ 
+         return 'Server shutting down...', HTTPStatus.OK.value
+diff --git a/kytos/core/auth.py b/kytos/core/auth.py
+index 4d38bb7..80bd8f4 100644
+--- a/kytos/core/auth.py
++++ b/kytos/core/auth.py
+@@ -26,12 +26,11 @@ def authenticated(func):
+         try:
+             content = request.headers.get("Authorization")
+             if content is None:
+-                raise ValueError("The attribute 'content' has an invalid "
+-                                 "value 'None'.")
++                raise AttributeError
+             token = content.split("Bearer ")[1]
+             jwt.decode(token, key=Auth.get_jwt_secret())
+         except (
+-            ValueError,
++            AttributeError,
+             IndexError,
+             jwt.ExpiredSignature,
+             jwt.exceptions.DecodeError,
+diff --git a/tests/unit/test_core/test_api_server.py b/tests/unit/test_core/test_api_server.py
+index 109aa09..20ff2bd 100644
+--- a/tests/unit/test_core/test_api_server.py
++++ b/tests/unit/test_core/test_api_server.py
+@@ -54,29 +54,22 @@ class TestAPIServer(unittest.TestCase):
+ 
+         mock_exit.assert_called()
+ 
+-    @patch('kytos.core.auth.request')
+-    @patch('kytos.core.auth.jwt.decode', return_value=True)
+-    def test_shutdown_api(self, _, mock_request):
++    @patch('kytos.core.api_server.request')
++    def test_shutdown_api(self, mock_request):
+         """Test shutdown_api method."""
++        mock_request.host = 'localhost:8181'
+ 
+-        mock_request.headers = {'Authorization': 'Bearer 123'}
+         self.api_server.shutdown_api()
+ 
+         self.api_server.server.stop.assert_called()
+ 
+-    @patch('kytos.core.auth.jsonify')
+-    @patch('kytos.core.auth.request')
+-    def test_shutdown_api__error(self, mock_request, mock_jsonify):
++    @patch('kytos.core.api_server.request')
++    def test_shutdown_api__error(self, mock_request):
+         """Test shutdown_api method to error case."""
++        mock_request.host = 'any:port'
+ 
+-        mock_request.headers = {'Authorization': None}
+         self.api_server.shutdown_api()
+ 
+-        exc_msg = "The attribute 'content' has an invalid value 'None'."
+-        msg = f"Token not sent or expired: {exc_msg}"
+-
+-        mock_jsonify.assert_called_with({"error": msg})
+-
+         self.api_server.server.stop.assert_not_called()
+ 
+     def test_status_api(self):
