@@ -1,7 +1,7 @@
-From f3e36b0b86fe3654e083cca092205c97156fd8ec Mon Sep 17 00:00:00 2001
+From c1e3f5eb1736585181319478f676c7a23e0aa49c Mon Sep 17 00:00:00 2001
 From: Carlos Magno <cmagnobarbosa@gmail.com>
 Date: Thu, 1 Apr 2021 17:21:20 -0300
-Subject: [PATCH 1/8] Add support for non-strict exclusion in the consistency
+Subject: [PATCH 1/9] Add support for non-strict exclusion in the consistency
  check
 
 Currently consistency check is not supported for no-strict deletion.
@@ -12,7 +12,7 @@ This modification begins to solve this problem by adding support for non-strict 
  2 files changed, 21 insertions(+), 4 deletions(-)
 
 diff --git a/main.py b/main.py
-index c737f85..6371320 100644
+index ea4e2b3..53a86bf 100644
 --- a/main.py
 +++ b/main.py
 @@ -1,5 +1,6 @@
@@ -21,8 +21,8 @@ index c737f85..6371320 100644
 +from copy import deepcopy
  
  from flask import jsonify, request
- from pyof.v0x01.asynchronous.error_msg import BadActionCode
-@@ -7,6 +8,7 @@
+ from pyof.foundation.base import UBIntBase
+@@ -8,6 +9,7 @@
  
  from kytos.core import KytosEvent, KytosNApp, log, rest
  from kytos.core.helpers import listen_to
@@ -30,7 +30,7 @@ index c737f85..6371320 100644
  from napps.kytos.flow_manager.storehouse import StoreHouse
  from napps.kytos.of_core.flow import FlowFactory
  
-@@ -161,7 +163,7 @@ def _store_changed_flows(self, command, flow, switch):
+@@ -172,7 +174,7 @@ def _store_changed_flows(self, command, flow, switch):
              flow: Flows to be stored
              switch: Switch target
          """
@@ -39,7 +39,7 @@ index c737f85..6371320 100644
          # if the flow has a destination dpid it can be stored.
          if not switch:
              log.info('The Flow cannot be stored, the destination switch '
-@@ -171,6 +173,7 @@ def _store_changed_flows(self, command, flow, switch):
+@@ -182,6 +184,7 @@ def _store_changed_flows(self, command, flow, switch):
          flow_list = []
          installed_flow['command'] = command
          installed_flow['flow'] = flow
@@ -47,7 +47,7 @@ index c737f85..6371320 100644
  
          serializer = FlowFactory.get_class(switch)
          installed_flow_obj = serializer.from_dict(flow, switch)
-@@ -185,7 +188,16 @@ def _store_changed_flows(self, command, flow, switch):
+@@ -196,7 +199,16 @@ def _store_changed_flows(self, command, flow, switch):
              for stored_flow in stored_flows:
                  stored_flow_obj = serializer.from_dict(stored_flow['flow'],
                                                         switch)
@@ -65,7 +65,7 @@ index c737f85..6371320 100644
                      if stored_flow['command'] == installed_flow['command']:
                          log.debug('Data already stored.')
                          return
-@@ -195,16 +207,19 @@ def _store_changed_flows(self, command, flow, switch):
+@@ -206,16 +218,19 @@ def _store_changed_flows(self, command, flow, switch):
                      # is to remove it. In this case, the old instruction is
                      # removed and the new one is stored.
                      stored_flow['command'] = installed_flow.get('command')
@@ -98,10 +98,10 @@ index 11bc877..1a3bb2a 100644
 +
 +IPV4 = 2048
 
-From e9d86fbc5ac7a774014ad91a9e54a8530f45a69d Mon Sep 17 00:00:00 2001
+From 9c957344fc30cef3e8d2d902e476f45e0e686da0 Mon Sep 17 00:00:00 2001
 From: Carlos Magno <cmagnobarbosa@gmail.com>
 Date: Thu, 1 Apr 2021 17:33:00 -0300
-Subject: [PATCH 2/8] Add new methods to compare whether two Flows are equal
+Subject: [PATCH 2/9] Add new methods to compare whether two Flows are equal
 
 ---
  match.py | 177 +++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -292,10 +292,10 @@ index 0000000..f62c604
 +    match = do_match(flow_to_install, version, stored_flow_dict)
 +    return match
 
-From 9dad3baaccc02120c3acd246850501557fadab36 Mon Sep 17 00:00:00 2001
+From 376e4115b9dc763f2582f77743bfab8d9776cef2 Mon Sep 17 00:00:00 2001
 From: Carlos Magno <cmagnobarbosa@gmail.com>
 Date: Tue, 6 Apr 2021 12:49:00 -0300
-Subject: [PATCH 3/8] Add support for match packets using IP mask
+Subject: [PATCH 3/9] Add support for match packets using IP mask
 
 ---
  match.py | 13 +++++++++++--
@@ -328,10 +328,10 @@ index f62c604..e9671cc 100644
  
  def match_flows(flow_to_install, version, stored_flow_dict):
 
-From 6bfe8f63b0a704e0d5552ae424298af2738ada75 Mon Sep 17 00:00:00 2001
+From d0e06e21bb913f8f191ee3dbf7daa245278964cb Mon Sep 17 00:00:00 2001
 From: Carlos Magno <cmagnobarbosa@gmail.com>
 Date: Mon, 5 Apr 2021 14:25:25 -0300
-Subject: [PATCH 4/8] Refactor the non-strict match
+Subject: [PATCH 4/9] Refactor the non-strict match
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -344,10 +344,10 @@ Co-authored-by: Humberto Diógenes <hdiogenes@gmail.com>
  3 files changed, 58 insertions(+), 82 deletions(-)
 
 diff --git a/main.py b/main.py
-index 6371320..7ed87b1 100644
+index 53a86bf..ea5bbbe 100644
 --- a/main.py
 +++ b/main.py
-@@ -192,8 +192,7 @@ def _store_changed_flows(self, command, flow, switch):
+@@ -203,8 +203,7 @@ def _store_changed_flows(self, command, flow, switch):
                  version = switch.connection.protocol.version
  
                  if installed_flow['command'] == 'delete':
@@ -555,10 +555,10 @@ index 1a3bb2a..11bc877 100644
 -
 -IPV4 = 2048
 
-From c7f1d60e789bee2b6063a3f53cf329882d73e108 Mon Sep 17 00:00:00 2001
+From 8327d306fb34c7b6945b69bb868fa7e844f642bc Mon Sep 17 00:00:00 2001
 From: Carlos Magno <cmagnobarbosa@gmail.com>
 Date: Tue, 6 Apr 2021 14:23:17 -0300
-Subject: [PATCH 5/8] Refactor the non-strict match (OF1.0) method to improve
+Subject: [PATCH 5/9] Refactor the non-strict match (OF1.0) method to improve
  code quality
 
 ---
@@ -660,10 +660,10 @@ index c7ba830..020311d 100644
  
  
 
-From 7bb0ac3d43a70535d6a11279baa720290885127b Mon Sep 17 00:00:00 2001
+From 3c32ca4f21f1fd5ef373a27cd20dd52099978cf3 Mon Sep 17 00:00:00 2001
 From: Carlos Magno <cmagnobarbosa@gmail.com>
 Date: Wed, 7 Apr 2021 20:18:23 -0300
-Subject: [PATCH 6/8] Fix the IPv4 and cookie mask used to compare non-strict
+Subject: [PATCH 6/9] Fix the IPv4 and cookie mask used to compare non-strict
  flows
 
 Fix the masks in the non-strict delete operation.
@@ -714,10 +714,10 @@ index 020311d..210789f 100644
  
  
 
-From b7489078036531c99ee46deeff780884d4781f64 Mon Sep 17 00:00:00 2001
+From 91d699512fc319ab5848aecfaebae30ba6e3d341 Mon Sep 17 00:00:00 2001
 From: Carlos Magno <cmagnobarbosa@gmail.com>
 Date: Wed, 7 Apr 2021 20:04:13 -0300
-Subject: [PATCH 7/8] Add unit tests for non-strict delete in the consistency
+Subject: [PATCH 7/9] Add unit tests for non-strict delete in the consistency
  check
 
 Add unit test for non-strict delete using the cookie and IPv4 (OF 1.3) in the consistency check.
@@ -726,10 +726,10 @@ Add unit test for non-strict delete using the cookie and IPv4 (OF 1.3) in the co
  1 file changed, 136 insertions(+)
 
 diff --git a/tests/unit/test_main.py b/tests/unit/test_main.py
-index 78e160b..7ea1b08 100644
+index 87200a7..4726cf4 100644
 --- a/tests/unit/test_main.py
 +++ b/tests/unit/test_main.py
-@@ -362,3 +362,139 @@ def test_check_storehouse_consistency(self, *args):
+@@ -381,3 +381,139 @@ def test_check_storehouse_consistency(self, *args):
          self.napp.stored_flows = {dpid: {"flow_list": flow_list}}
          self.napp.check_storehouse_consistency(switch)
          mock_install_flows.assert_called()
@@ -870,17 +870,17 @@ index 78e160b..7ea1b08 100644
 +        mock_save_flow.assert_called()
 +        self.assertEqual(len(self.napp.stored_flows[dpid]['flow_list']), 3)
 
-From 82534b73d84afc4b2c15b75aeb749f51eaa9e208 Mon Sep 17 00:00:00 2001
+From 48ae4718dd8ef889bd238d0b1fe9f5c9f74402b2 Mon Sep 17 00:00:00 2001
 From: Carlos Magno <cmagnobarbosa@gmail.com>
 Date: Thu, 22 Apr 2021 11:13:40 -0300
-Subject: [PATCH 8/8] Fix linter issues
+Subject: [PATCH 8/9] Fix linter and indentation issues in unit tests
 
 ---
- tests/unit/test_main.py | 2 +-
- 1 file changed, 1 insertion(+), 1 deletion(-)
+ tests/unit/test_main.py | 122 ++++++++++++++++++----------------------
+ 1 file changed, 54 insertions(+), 68 deletions(-)
 
 diff --git a/tests/unit/test_main.py b/tests/unit/test_main.py
-index 7ea1b08..795c2e0 100644
+index 4726cf4..a9afb05 100644
 --- a/tests/unit/test_main.py
 +++ b/tests/unit/test_main.py
 @@ -7,7 +7,7 @@
@@ -892,3 +892,305 @@ index 7ea1b08..795c2e0 100644
  class TestMain(TestCase):
      """Tests for the Main class."""
  
+@@ -395,35 +395,25 @@ def test_no_strict_delete(self, *args):
+         switch = get_switch_mock(dpid, 0x04)
+         switch.id = dpid
+         stored_flow = {
+-                        "command": "add",
+-                        "flow": {
+-                            "actions": [
+-                                {
+-                                    "action_type": "set_vlan",
+-                                    "vlan_id": 300
+-                                }
+-                            ],
+-                            "cookie": 6191162389751548793,
+-                            "match": {
+-                                "dl_vlan": 300,
+-                                "in_port": 1
+-                            }
+-                        }
+-                    }
++            "command": "add",
++            "flow": {
++                "actions": [{"action_type": "set_vlan", "vlan_id": 300}],
++                "cookie": 6191162389751548793,
++                "match": {"dl_vlan": 300, "in_port": 1},
++            },
++        }
+         stored_flow2 = {
+-                        "command": "add",
+-                        "flow": {
+-                                "actions": [],
+-                                "cookie": 4961162389751548787,
+-                                "match": {
+-                                    "in_port": 2
+-                                    }
+-                                }
+-                        }
++            "command": "add",
++            "flow": {
++                "actions": [],
++                "cookie": 4961162389751548787,
++                "match": {"in_port": 2},
++            },
++        }
+         flow_to_install = {
+-                            "cookie": 6191162389751548793,
+-                            "cookie_mask": 18446744073709551615
+-                        }
++            "cookie": 6191162389751548793,
++            "cookie_mask": 18446744073709551615,
++        }
+         flow_list = {"flow_list": [stored_flow, stored_flow2]}
+         command = "delete"
+         self.napp.stored_flows = {dpid: flow_list}
+@@ -445,27 +435,25 @@ def test_no_strict_delete_with_ipv4(self, *args):
+         switch = get_switch_mock(dpid, 0x04)
+         switch.id = dpid
+         stored_flow = {
+-                    "command": "add",
+-                    "flow": {
+-                        "priority": 10,
+-                        "cookie": 84114904,
+-                        "match": {
+-                            "ipv4_src": "192.168.1.120",
+-                            "ipv4_dst": "192.168.0.2",
+-                        },
+-                        "actions": []
+-                        }
+-                    }
++            "command": "add",
++            "flow": {
++                "priority": 10,
++                "cookie": 84114904,
++                "match": {
++                    "ipv4_src": "192.168.1.120",
++                    "ipv4_dst": "192.168.0.2",
++                },
++                "actions": [],
++            },
++        }
+         stored_flow2 = {
+-                        "command": "add",
+-                        "flow": {
+-                                    "actions": [],
+-                                    "cookie": 4961162389751548787,
+-                                    "match": {
+-                                        "in_port": 2
+-                                    }
+-                                }
+-                        }
++            "command": "add",
++            "flow": {
++                "actions": [],
++                "cookie": 4961162389751548787,
++                "match": {"in_port": 2},
++            },
++        }
+         flow_to_install = {"match": {"ipv4_src": '192.168.1.1/24'}}
+         flow_list = {"flow_list": [stored_flow, stored_flow2]}
+         command = "delete"
+@@ -488,27 +476,25 @@ def test_no_strict_delete_with_ipv4_fail(self, *args):
+         switch = get_switch_mock(dpid, 0x04)
+         switch.id = dpid
+         stored_flow = {
+-                    "command": "add",
+-                    "flow": {
+-                        "priority": 10,
+-                        "cookie": 84114904,
+-                        "match": {
+-                            "ipv4_src": "192.168.2.1",
+-                            "ipv4_dst": "192.168.0.2",
+-                        },
+-                        "actions": []
+-                        }
+-                    }
++            "command": "add",
++            "flow": {
++                "priority": 10,
++                "cookie": 84114904,
++                "match": {
++                    "ipv4_src": "192.168.2.1",
++                    "ipv4_dst": "192.168.0.2",
++                },
++                "actions": [],
++            },
++        }
+         stored_flow2 = {
+-                        "command": "add",
+-                        "flow": {
+-                                    "actions": [],
+-                                    "cookie": 4961162389751548787,
+-                                    "match": {
+-                                        "in_port": 2
+-                                    }
+-                                }
+-                        }
++            "command": "add",
++            "flow": {
++                "actions": [],
++                "cookie": 4961162389751548787,
++                "match": {"in_port": 2},
++            },
++        }
+         flow_to_install = {"match": {"ipv4_src": '192.168.1.1/24'}}
+         flow_list = {"flow_list": [stored_flow, stored_flow2]}
+         command = "delete"
+
+From 4b1644d53e7617efd6ba030ffbdbc33671156e86 Mon Sep 17 00:00:00 2001
+From: Carlos Magno <cmagnobarbosa@gmail.com>
+Date: Tue, 27 Apr 2021 22:42:14 -0300
+Subject: [PATCH 9/9] Refactor non-strict match
+
+---
+ main.py  |  4 ++--
+ match.py | 64 ++++++++++++++++----------------------------------------
+ 2 files changed, 20 insertions(+), 48 deletions(-)
+
+diff --git a/main.py b/main.py
+index ea5bbbe..bd11944 100644
+--- a/main.py
++++ b/main.py
+@@ -9,7 +9,7 @@
+ 
+ from kytos.core import KytosEvent, KytosNApp, log, rest
+ from kytos.core.helpers import listen_to
+-from napps.kytos.flow_manager.match import match_flows
++from napps.kytos.flow_manager.match import match_flow
+ from napps.kytos.flow_manager.storehouse import StoreHouse
+ from napps.kytos.of_core.flow import FlowFactory
+ 
+@@ -204,7 +204,7 @@ def _store_changed_flows(self, command, flow, switch):
+ 
+                 if installed_flow['command'] == 'delete':
+                     # No strict match
+-                    if match_flows(flow, version, stored_flow['flow']):
++                    if match_flow(flow, version, stored_flow['flow']):
+                         deleted_flows.append(stored_flow)
+ 
+                 elif installed_flow_obj == stored_flow_obj:
+diff --git a/match.py b/match.py
+index 210789f..8e00633 100644
+--- a/match.py
++++ b/match.py
+@@ -15,10 +15,15 @@ def format_request(request):
+     return args
+ 
+ 
+-def do_match(flow_to_install, version, stored_flow_dict):
+-    """Match a packet against this flow."""
++def match_flow(flow_to_install, version, stored_flow_dict):
++    """Check that the flow fields match.
++
++    It has support for (OF 1.0) and (OF 1.3) flows.
++    If fields match, return the flow, otherwise return False.
++    Does not require that all fields match.
++    """
+     if version == 0x01:
+-        return match10(stored_flow_dict, flow_to_install)
++        return match10(flow_to_install, stored_flow_dict)
+     elif version == 0x04:
+         return match13_no_strict(flow_to_install, stored_flow_dict)
+     raise NotImplementedError(f'Unsupported OpenFlow version {version}')
+@@ -36,8 +41,10 @@ def _get_match_fields(flow_dict):
+ # pylint: disable=too-many-return-statements, too-many-statements, R0912
+ def _match_ipv4_10(match_fields, args, wildcards):
+     """Match IPV4 fields against packet with Flow (OF1.0)."""
+-    if not match_fields['eth_type'] == IPV4_ETH_TYPE:
+-        return False
++    # if not 'eth_type' in (match_fields, wildcards):
++    #     return False
++    # if not match_fields['eth_type'] == IPV4_ETH_TYPE:
++    #     return False
+     flow_ip_int = int(ipaddress.IPv4Address(match_fields.get('ipv4_src')))
+     if flow_ip_int != 0:
+         mask = (wildcards
+@@ -65,23 +72,15 @@ def _match_ipv4_10(match_fields, args, wildcards):
+         if ip_int & mask != flow_ip_int & mask:
+             return False
+     if not wildcards & FlowWildCards.OFPFW_NW_TOS:
+-        if 'ip_tos' not in args:
+-            return False
+         if match_fields.get('ip_tos') != int(args.get('ip_tos')):
+             return False
+     if not wildcards & FlowWildCards.OFPFW_NW_PROTO:
+-        if 'ip_proto' not in args:
+-            return False
+         if match_fields.get('ip_proto') != int(args.get('ip_proto')):
+             return False
+     if not wildcards & FlowWildCards.OFPFW_TP_SRC:
+-        if 'tp_src' not in args:
+-            return False
+         if match_fields.get('tcp_src') != int(args.get('tp_src')):
+             return False
+     if not wildcards & FlowWildCards.OFPFW_TP_DST:
+-        if 'tp_dst' not in args:
+-            return False
+         if match_fields.get('tcp_dst') != int(args.get('tp_dst')):
+             return False
+     return True
+@@ -90,37 +89,26 @@ def _match_ipv4_10(match_fields, args, wildcards):
+ # pylint: disable=too-many-return-statements, too-many-statements, R0912
+ def match10(flow_dict, args):
+     """Match a packet against this flow (OF1.0)."""
++    args = _get_match_fields(args)
+     match_fields = _get_match_fields(flow_dict)
+-    wildcards = match_fields.get('wildcards')
++    wildcards = match_fields.get('wildcards', 0)
+     if not wildcards & FlowWildCards.OFPFW_IN_PORT:
+-        if 'in_port' not in args:
+-            return False
+-        if match_fields.get('in_port') != int(args.get('in_port')):
++        if match_fields.get('in_port') != args.get('in_port'):
+             return False
+     if not wildcards & FlowWildCards.OFPFW_DL_VLAN_PCP:
+-        if 'vlan_pcp' not in args:
+-            return False
+-        if match_fields.get('vlan_pcp') != int(args.get('vlan_pcp')):
++        if match_fields.get('vlan_pcp') != args.get('vlan_pcp'):
+             return False
+     if not wildcards & FlowWildCards.OFPFW_DL_VLAN:
+-        if 'vlan_vid' not in args:
+-            return False
+-        if match_fields.get('vlan_vid') != args.get('vlan_vid')[-1]:
++        if match_fields.get('vlan_vid') != args.get('vlan_vid'):
+             return False
+     if not wildcards & FlowWildCards.OFPFW_DL_SRC:
+-        if 'eth_src' not in args:
+-            return False
+         if match_fields.get('eth_src') != args.get('eth_src'):
+             return False
+     if not wildcards & FlowWildCards.OFPFW_DL_DST:
+-        if 'eth_dst' not in args:
+-            return False
+         if match_fields.get('eth_dst') != args.get('eth_dst'):
+             return False
+     if not wildcards & FlowWildCards.OFPFW_DL_TYPE:
+-        if 'eth_type' not in args:
+-            return False
+-        if match_fields.get('eth_type') != int(args.get('eth_type')):
++        if match_fields.get('eth_type') != args.get('eth_type'):
+             return False
+     if not _match_ipv4_10(match_fields, args, wildcards):
+         return False
+@@ -158,19 +146,3 @@ def match13_no_strict(flow_to_install, stored_flow_dict):
+             if masked_ip_addr == masked_stored_ip:
+                 return stored_flow_dict
+     return False
+-
+-
+-def match_flows(flow_to_install, version, stored_flow_dict):
+-    # pylint: disable=bad-staticmethod-argument
+-    """
+-    Match the packet in request against the flows installed in the switch.
+-
+-    Try the match with each flow, in other. If many is True, tries the
+-    match with all flows, if False, tries until the first match.
+-    :param args: packet data
+-    :param many: Boolean, indicating whether to continue after matching the
+-            first flow or not
+-    :return: If many, the list of matched flows, or the matched flow
+-    """
+-    match = do_match(flow_to_install, version, stored_flow_dict)
+-    return match
