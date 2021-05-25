@@ -1,8 +1,8 @@
 From b5e7e64f43d60d7f0bca392a397fef37bb704dd0 Mon Sep 17 00:00:00 2001
 From: Italo Valcy <italo@ampath.net>
 Date: Sat, 24 Apr 2021 21:25:48 -0400
-Subject: [PATCH] adding listening to kytos/of_core.flow_stats.received to run
- consistency check
+Subject: [PATCH 1/4] adding listening to kytos/of_core.flow_stats.received to
+ run consistency check
 
 ---
  main.py     | 11 +++++++++++
@@ -46,3 +46,139 @@ index 11bc877..f6e92b7 100644
 +#  CONSISTENCY_INTERVAL < 0 --> disables consistency check
 +#  CONSISTENCY_INTERVAL > 0 --> run periodically based on the interval
 +CONSISTENCY_INTERVAL = 0
+
+From 244fc4f4ca3717fb19a8b5e8feb277254d9931c3 Mon Sep 17 00:00:00 2001
+From: Italo Valcy <italo@ampath.net>
+Date: Tue, 25 May 2021 14:27:35 -0300
+Subject: [PATCH 2/4] simplifying consistency check routine config to only
+ enabled or disable: if enabled it will be run through the flow_stats event
+ (as discussed in kytos meeting 2021-05-20
+
+---
+ main.py     | 21 ++-------------------
+ settings.py |  7 +------
+ 2 files changed, 3 insertions(+), 25 deletions(-)
+
+diff --git a/main.py b/main.py
+index 99e6f3a..8eb28cf 100644
+--- a/main.py
++++ b/main.py
+@@ -11,7 +11,7 @@
+ from napps.kytos.of_core.flow import FlowFactory
+ 
+ from .exceptions import InvalidCommandError
+-from .settings import CONSISTENCY_INTERVAL, FLOWS_DICT_MAX_SIZE
++from .settings import ENABLE_CONSISTENCY_CHECK, FLOWS_DICT_MAX_SIZE
+ 
+ 
+ class Main(KytosNApp):
+@@ -36,8 +36,6 @@ def setup(self):
+         #                                      'flow': {flow_dict}}]}}}
+         self.stored_flows = {}
+         self.resent_flows = set()
+-        if CONSISTENCY_INTERVAL > 0:
+-            self.execute_as_loop(CONSISTENCY_INTERVAL)
+ 
+     def execute(self):
+         """Run once on NApp 'start' or in a loop.
+@@ -47,9 +45,6 @@ def execute(self):
+         """
+         self._load_flows()
+ 
+-        if CONSISTENCY_INTERVAL > 0:
+-            self.consistency_check()
+-
+     def shutdown(self):
+         """Shutdown routine of the NApp."""
+         log.debug("flow-manager stopping")
+@@ -75,7 +70,7 @@ def resend_stored_flows(self, event):
+     @listen_to('kytos/of_core.flow_stats.received')
+     def on_flow_stats_check_consistency(self, event):
+         """Check the consistency of a switch upon receiving flow stats."""
+-        if CONSISTENCY_INTERVAL != 0:
++        if ENABLE_CONSISTENCY_CHECK is False:
+             return
+         switch = event.content['switch']
+         if switch.is_enabled():
+@@ -83,18 +78,6 @@ def on_flow_stats_check_consistency(self, event):
+             if switch.dpid in self.stored_flows:
+                 self.check_switch_consistency(switch)
+ 
+-    def consistency_check(self):
+-        """Check the consistency of flows in each switch."""
+-        switches = self.controller.switches.values()
+-
+-        for switch in switches:
+-            # Check if a dpid is a key in 'stored_flows' dictionary
+-            if switch.is_enabled():
+-                self.check_storehouse_consistency(switch)
+-
+-                if switch.dpid in self.stored_flows:
+-                    self.check_switch_consistency(switch)
+-
+     def check_switch_consistency(self, switch):
+         """Check consistency of installed flows for a specific switch."""
+         dpid = switch.dpid
+diff --git a/settings.py b/settings.py
+index f6e92b7..39fe317 100644
+--- a/settings.py
++++ b/settings.py
+@@ -4,9 +4,4 @@
+ FLOWS_DICT_MAX_SIZE = 10000
+ # Time (in seconds) to wait retrieve box from storehouse
+ BOX_RESTORE_TIMER = 0.1
+-# CONSISTENCY_INTERVAL defines the strategy and interval
+-# to run the consistency check
+-#  CONSISTENCY_INTERVAL = 0 --> run based on the flow_stats.received event
+-#  CONSISTENCY_INTERVAL < 0 --> disables consistency check
+-#  CONSISTENCY_INTERVAL > 0 --> run periodically based on the interval
+-CONSISTENCY_INTERVAL = 0
++ENABLE_CONSISTENCY_CHECK = True
+
+From 3716e6f25cbdd8acd14a1541bbe04f3b9a98ab64 Mon Sep 17 00:00:00 2001
+From: Italo Valcy <italo@ampath.net>
+Date: Tue, 25 May 2021 14:49:06 -0300
+Subject: [PATCH 3/4] replacing obsolete CONSISTENCY_INTERVAL setting by
+ ENABLE_CONSISTENCY_CHECK
+
+---
+ main.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/main.py b/main.py
+index 4b1e84d..17f649f 100644
+--- a/main.py
++++ b/main.py
+@@ -67,7 +67,7 @@ def shutdown(self):
+     def resend_stored_flows(self, event):
+         """Resend stored Flows."""
+         # if consistency check is enabled, it should take care of this
+-        if CONSISTENCY_INTERVAL >= 0:
++        if ENABLE_CONSISTENCY_CHECK is True:
+             return
+         switch = event.content['switch']
+         dpid = str(switch.dpid)
+
+From 61117afe106dab56d7fb2709a25f00ba7c0a220c Mon Sep 17 00:00:00 2001
+From: Italo Valcy <italo@ampath.net>
+Date: Tue, 25 May 2021 14:49:49 -0300
+Subject: [PATCH 4/4] fix unit test to consider ENABLE_CONSISTENCY_CHECK
+ instead of CONSISTENCY_INTERVAL
+
+---
+ tests/unit/test_main.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tests/unit/test_main.py b/tests/unit/test_main.py
+index 12db760..a58ead5 100644
+--- a/tests/unit/test_main.py
++++ b/tests/unit/test_main.py
+@@ -261,7 +261,7 @@ def test_load_flows(self, mock_storehouse):
+         self.napp._load_flows()
+         mock_storehouse.assert_called()
+ 
+-    @patch("napps.kytos.flow_manager.main.CONSISTENCY_INTERVAL", -1)
++    @patch("napps.kytos.flow_manager.main.ENABLE_CONSISTENCY_CHECK", False)
+     @patch("napps.kytos.flow_manager.main.Main._install_flows")
+     def test_resend_stored_flows(self, mock_install_flows):
+         """Test resend stored flows."""
