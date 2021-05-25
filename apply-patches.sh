@@ -20,7 +20,7 @@ for NAPP in $(ls -1 patches/napps/); do
 	echo $NAPP
 	NAPP_DIR=$(python3 -m pip show $NAPP | grep Location | awk '{print $NF}')
 	cd $NAPP_DIR
-	for PATCH in $ORIG_DIR/patches/napps/$NAPP/*; do
+	for PATCH in $(find $ORIG_DIR/patches/napps/$NAPP/ -type f -name '*.patch'); do
 		echo $PATCH
 		$PATCH_BIN -p1 < $PATCH
 	done
