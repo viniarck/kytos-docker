@@ -1,0 +1,52 @@
+From 92a1c1e3626115c06ad9330f3b050b382bf95930 Mon Sep 17 00:00:00 2001
+From: Antonio Francisco <ajoaoff@gmail.com>
+Date: Wed, 5 May 2021 10:57:50 -0300
+Subject: [PATCH] Update scheduler on maintenance update
+
+The scheduler is now removed and then added again
+when updating the maintenance.
+Fix #40
+---
+ main.py                 | 2 ++
+ tests/unit/test_main.py | 7 ++++++-
+ 2 files changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/main.py b/main.py
+index ce829e7..0238e43 100644
+--- a/main.py
++++ b/main.py
+@@ -94,6 +94,8 @@ def update_mw(self, mw_id):
+             maintenance.update(data)
+         except ValueError as error:
+             return jsonify(f'{error}'), 400
++        self.scheduler.remove(maintenance)
++        self.scheduler.add(maintenance)
+         return jsonify({'response': f'Maintenance {mw_id} updated'}), 201
+ 
+     @rest('/<mw_id>', methods=['DELETE'])
+diff --git a/tests/unit/test_main.py b/tests/unit/test_main.py
+index 606edf2..1e15f25 100644
+--- a/tests/unit/test_main.py
++++ b/tests/unit/test_main.py
+@@ -367,8 +367,11 @@ def test_update_mw_case_2(self):
+         self.assertEqual(current_data,
+                          'Bad request: The request do not have a json.')
+ 
++    @patch('napps.kytos.maintenance.models.Scheduler.add')
++    @patch('napps.kytos.maintenance.models.Scheduler.remove')
+     @patch('napps.kytos.maintenance.models.MaintenanceWindow.update')
+-    def test_update_mw_case_3(self, mw_update_mock):
++    def test_update_mw_case_3(self, mw_update_mock, sched_remove_mock,
++                              sched_add_mock):
+         """Test successful update."""
+         start1 = datetime.now(pytz.utc) + timedelta(days=1)
+         end1 = start1 + timedelta(hours=6)
+@@ -394,6 +397,8 @@ def test_update_mw_case_3(self, mw_update_mock):
+         self.assertEqual(current_data,
+                          {'response': 'Maintenance 1234 updated'})
+         mw_update_mock.assert_called_once_with(payload)
++        sched_add_mock.assert_called_once()
++        sched_remove_mock.assert_called_once()
+ 
+     @patch('napps.kytos.maintenance.models.MaintenanceWindow.update')
+     def test_update_mw_case_4(self, mw_update_mock):

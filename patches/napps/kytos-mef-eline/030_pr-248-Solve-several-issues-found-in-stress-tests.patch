@@ -1,0 +1,187 @@
+From 80cc2171bd26c520f3af9ca810c6765038f81a28 Mon Sep 17 00:00:00 2001
+From: Antonio Francisco <ajoaoff@gmail.com>
+Date: Thu, 13 May 2021 10:11:10 -0300
+Subject: [PATCH 1/4] Avoid dictionary changed errors
+
+When iterating through a dictionary, get a tuple of keys
+instead of a view, avoiding errors when the dictionary changes.
+---
+ main.py | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/main.py b/main.py
+index 521beb3..c79200e 100644
+--- a/main.py
++++ b/main.py
+@@ -52,7 +52,7 @@ def setup(self):
+ 
+     def execute(self):
+         """Execute once when the napp is running."""
+-        for circuit in self.circuits.values():
++        for circuit in tuple(self.circuits.values()):
+             if circuit.is_enabled() and not circuit.is_active():
+                 circuit.deploy()
+ 
+@@ -461,7 +461,7 @@ def _is_duplicated_evc(self, evc):
+             boolean: True if the circuit is duplicated, otherwise False.
+ 
+         """
+-        for circuit in self.circuits.values():
++        for circuit in tuple(self.circuits.values()):
+             if not circuit.archived and circuit.shares_uni(evc):
+                 return True
+         return False
+
+From 7320b576417046614fc07d47b169ba8f7731dbe0 Mon Sep 17 00:00:00 2001
+From: Antonio Francisco <ajoaoff@gmail.com>
+Date: Thu, 13 May 2021 16:47:27 -0300
+Subject: [PATCH 2/4] Do not load to memory archived EVCs
+
+Archived EVCs cannot be used or changed, so there is
+no need for them to be in memory.
+---
+ main.py                 | 2 ++
+ tests/unit/test_main.py | 6 ++----
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/main.py b/main.py
+index c79200e..d4bfce5 100644
+--- a/main.py
++++ b/main.py
+@@ -486,6 +486,8 @@ def handle_link_down(self, event):
+     def load_circuits_by_interface(self, circuits):
+         """Load circuits in storehouse for in-memory dictionary."""
+         for circuit_id, circuit in circuits.items():
++            if circuit['archived'] is True:
++                continue
+             intf_a = circuit['uni_a']['interface_id']
+             self.add_to_dict_of_sets(intf_a, circuit_id)
+             intf_z = circuit['uni_z']['interface_id']
+diff --git a/tests/unit/test_main.py b/tests/unit/test_main.py
+index ba25fc2..e433fa4 100644
+--- a/tests/unit/test_main.py
++++ b/tests/unit/test_main.py
+@@ -696,11 +696,9 @@ def test_load_circuits_by_interface(self):
+ 
+         expected_result = {
+             '00:00:00:00:00:00:00:03:12':
+-                {'182f5bac84074017a262a2321195dbb4',
+-                 '65c4582cc8f249c2a5947ef500c19e37'},
++                {'65c4582cc8f249c2a5947ef500c19e37'},
+             '00:00:00:00:00:00:00:06:11':
+-                {'182f5bac84074017a262a2321195dbb4',
+-                 '65c4582cc8f249c2a5947ef500c19e37'},
++                {'65c4582cc8f249c2a5947ef500c19e37'},
+             '00:00:00:00:00:00:00:03:3':
+                 {'65c4582cc8f249c2a5947ef500c19e37'},
+             '00:00:00:00:00:00:00:05:2':
+
+From d52946dc54ca9f9007d32fafb57b4a1ceaa24e87 Mon Sep 17 00:00:00 2001
+From: Antonio Francisco <ajoaoff@gmail.com>
+Date: Thu, 13 May 2021 18:23:06 -0300
+Subject: [PATCH 3/4] Instantiate the lock only once
+
+---
+ storehouse.py | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/storehouse.py b/storehouse.py
+index 907eb91..a6f950f 100644
+--- a/storehouse.py
++++ b/storehouse.py
+@@ -22,7 +22,8 @@ def __init__(self, controller):
+         """Create a storehouse instance."""
+         self.controller = controller
+         self.namespace = 'kytos.mef_eline.circuits'
+-        self._lock = threading.Lock()
++        if '_lock' not in self.__dict__:
++            self._lock = threading.Lock()
+         if 'box' not in self.__dict__:
+             self.box = None
+         self.list_stored_boxes()
+
+From 0120ec09debc4596e7959d959b8f5e7865316080 Mon Sep 17 00:00:00 2001
+From: Antonio Francisco <ajoaoff@gmail.com>
+Date: Thu, 13 May 2021 18:26:25 -0300
+Subject: [PATCH 4/4] Use more locks to avoid race conditions
+
+---
+ main.py | 51 +++++++++++++++++++++++++++++----------------------
+ 1 file changed, 29 insertions(+), 22 deletions(-)
+
+diff --git a/main.py b/main.py
+index d4bfce5..3868385 100644
+--- a/main.py
++++ b/main.py
+@@ -2,6 +2,8 @@
+ 
+ NApp to provision circuits from user request.
+ """
++from threading import Lock
++
+ from flask import jsonify, request
+ from werkzeug.exceptions import (BadRequest, Conflict, Forbidden,
+                                  MethodNotAllowed, NotFound,
+@@ -48,6 +50,8 @@ def setup(self):
+         # dictionary of EVCs by interface
+         self._circuits_by_interface = {}
+ 
++        self._lock = Lock()
++
+         self.execute_as_loop(settings.DEPLOY_EVCS_INTERVAL)
+ 
+     def execute(self):
+@@ -508,28 +512,31 @@ def add_to_dict_of_sets(self, intf, circuit_id):
+     @listen_to('kytos/topology.port.created')
+     def load_evcs(self, event):
+         """Try to load the unloaded EVCs from storehouse."""
+-        log.debug("Event load_evcs %s", event)
+-        circuits = self.storehouse.get_data()
+-        if not self._circuits_by_interface:
+-            self.load_circuits_by_interface(circuits)
+-
+-        interface_id = '{}:{}'.format(event.content['switch'],
+-                                      event.content['port'])
+-
+-        for circuit_id in self._circuits_by_interface.get(interface_id, []):
+-            if circuit_id in circuits and circuit_id not in self.circuits:
+-                try:
+-                    evc = self._evc_from_dict(circuits[circuit_id])
+-                except ValueError as exception:
+-                    log.info(
+-                        f'Could not load EVC {circuit_id} because {exception}')
+-                    continue
+-
+-                evc.deactivate()
+-                evc.current_path = Path([])
+-                evc.sync()
+-                self.circuits.setdefault(circuit_id, evc)
+-                self.sched.add(evc)
++        with self._lock:
++            log.debug("Event load_evcs %s", event)
++            circuits = self.storehouse.get_data()
++            if not self._circuits_by_interface:
++                self.load_circuits_by_interface(circuits)
++
++            interface_id = '{}:{}'.format(event.content['switch'],
++                                          event.content['port'])
++
++            for circuit_id in self._circuits_by_interface.get(interface_id,
++                                                              []):
++                if circuit_id in circuits and circuit_id not in self.circuits:
++                    try:
++                        evc = self._evc_from_dict(circuits[circuit_id])
++                    except ValueError as exception:
++                        log.info(
++                            f'Could not load EVC {circuit_id} '
++                            f'because {exception}')
++                        continue
++
++                    evc.deactivate()
++                    evc.current_path = Path([])
++                    evc.sync()
++                    self.circuits.setdefault(circuit_id, evc)
++                    self.sched.add(evc)
+ 
+     @listen_to('kytos/flow_manager.flow.error')
+     def handle_flow_mod_error(self, event):

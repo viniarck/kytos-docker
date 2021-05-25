@@ -1,0 +1,32 @@
+From 6cef5e6b9d621f9b1077ff73391c6fd3d7035c43 Mon Sep 17 00:00:00 2001
+From: Antonio Francisco <ajoaoff@gmail.com>
+Date: Tue, 11 May 2021 11:57:59 -0300
+Subject: [PATCH] Status subclass of IntEnum instead of Enum
+
+This change allows Status to be JSON Serializable
+---
+ models.py | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/models.py b/models.py
+index 5979ec8..26aff73 100644
+--- a/models.py
++++ b/models.py
+@@ -4,7 +4,7 @@
+ scheduler.
+ """
+ import datetime
+-from enum import Enum
++from enum import IntEnum
+ from uuid import uuid4
+ 
+ import pytz
+@@ -18,7 +18,7 @@
+ TIME_FMT = "%Y-%m-%dT%H:%M:%S%z"
+ 
+ 
+-class Status(Enum):
++class Status(IntEnum):
+     """Maintenance windows status."""
+ 
+     PENDING = 0
