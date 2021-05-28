@@ -1,7 +1,7 @@
-From b5e7e64f43d60d7f0bca392a397fef37bb704dd0 Mon Sep 17 00:00:00 2001
+From f2d5bbfc66013f0b8648fc83067580fd949a8e3d Mon Sep 17 00:00:00 2001
 From: Italo Valcy <italo@ampath.net>
 Date: Sat, 24 Apr 2021 21:25:48 -0400
-Subject: [PATCH 1/4] adding listening to kytos/of_core.flow_stats.received to
+Subject: [PATCH 1/6] adding listening to kytos/of_core.flow_stats.received to
  run consistency check
 
 ---
@@ -10,12 +10,12 @@ Subject: [PATCH 1/4] adding listening to kytos/of_core.flow_stats.received to
  2 files changed, 17 insertions(+), 1 deletion(-)
 
 diff --git a/main.py b/main.py
-index c737f85..99e6f3a 100644
+index 0cfc97c..e4016bb 100644
 --- a/main.py
 +++ b/main.py
-@@ -72,6 +72,17 @@ def resend_stored_flows(self, event):
-             self.resent_flows.add(dpid)
-             log.info(f'Flows resent to Switch {dpid}')
+@@ -167,6 +167,17 @@ def consistency_ignored_check(self, flow):
+             return True
+         return False
  
 +    @listen_to('kytos/of_core.flow_stats.received')
 +    def on_flow_stats_check_consistency(self, event):
@@ -32,10 +32,10 @@ index c737f85..99e6f3a 100644
          """Check the consistency of flows in each switch."""
          switches = self.controller.switches.values()
 diff --git a/settings.py b/settings.py
-index 11bc877..f6e92b7 100644
+index cbd4aaf..31d5e34 100644
 --- a/settings.py
 +++ b/settings.py
-@@ -4,4 +4,9 @@
+@@ -4,7 +4,12 @@
  FLOWS_DICT_MAX_SIZE = 10000
  # Time (in seconds) to wait retrieve box from storehouse
  BOX_RESTORE_TIMER = 0.1
@@ -46,33 +46,37 @@ index 11bc877..f6e92b7 100644
 +#  CONSISTENCY_INTERVAL < 0 --> disables consistency check
 +#  CONSISTENCY_INTERVAL > 0 --> run periodically based on the interval
 +CONSISTENCY_INTERVAL = 0
+ 
+ # List of flows ignored by the consistency check
+ # To filter by a cookie or `table_id` use [value]
 
-From 244fc4f4ca3717fb19a8b5e8feb277254d9931c3 Mon Sep 17 00:00:00 2001
+From 7a2fa42d06b5c887e72f5bcec71a73963d61689f Mon Sep 17 00:00:00 2001
 From: Italo Valcy <italo@ampath.net>
 Date: Tue, 25 May 2021 14:27:35 -0300
-Subject: [PATCH 2/4] simplifying consistency check routine config to only
+Subject: [PATCH 2/6] simplifying consistency check routine config to only
  enabled or disable: if enabled it will be run through the flow_stats event
  (as discussed in kytos meeting 2021-05-20
 
 ---
- main.py     | 21 ++-------------------
+ main.py     | 22 +++-------------------
  settings.py |  7 +------
- 2 files changed, 3 insertions(+), 25 deletions(-)
+ 2 files changed, 4 insertions(+), 25 deletions(-)
 
 diff --git a/main.py b/main.py
-index 99e6f3a..8eb28cf 100644
+index e4016bb..1d51653 100644
 --- a/main.py
 +++ b/main.py
-@@ -11,7 +11,7 @@
+@@ -15,7 +15,8 @@
  from napps.kytos.of_core.flow import FlowFactory
  
  from .exceptions import InvalidCommandError
--from .settings import CONSISTENCY_INTERVAL, FLOWS_DICT_MAX_SIZE
-+from .settings import ENABLE_CONSISTENCY_CHECK, FLOWS_DICT_MAX_SIZE
+-from .settings import (CONSISTENCY_COOKIE_IGNORED_RANGE, CONSISTENCY_INTERVAL,
++from .settings import ENABLE_CONSISTENCY_CHECK
++from .settings import (CONSISTENCY_COOKIE_IGNORED_RANGE,
+                        CONSISTENCY_TABLE_ID_IGNORED_RANGE, FLOWS_DICT_MAX_SIZE)
  
  
- class Main(KytosNApp):
-@@ -36,8 +36,6 @@ def setup(self):
+@@ -95,8 +96,6 @@ def setup(self):
          #                                      'flow': {flow_dict}}]}}}
          self.stored_flows = {}
          self.resent_flows = set()
@@ -81,7 +85,7 @@ index 99e6f3a..8eb28cf 100644
  
      def execute(self):
          """Run once on NApp 'start' or in a loop.
-@@ -47,9 +45,6 @@ def execute(self):
+@@ -106,9 +105,6 @@ def execute(self):
          """
          self._load_flows()
  
@@ -91,7 +95,7 @@ index 99e6f3a..8eb28cf 100644
      def shutdown(self):
          """Shutdown routine of the NApp."""
          log.debug("flow-manager stopping")
-@@ -75,7 +70,7 @@ def resend_stored_flows(self, event):
+@@ -170,7 +166,7 @@ def consistency_ignored_check(self, flow):
      @listen_to('kytos/of_core.flow_stats.received')
      def on_flow_stats_check_consistency(self, event):
          """Check the consistency of a switch upon receiving flow stats."""
@@ -100,7 +104,7 @@ index 99e6f3a..8eb28cf 100644
              return
          switch = event.content['switch']
          if switch.is_enabled():
-@@ -83,18 +78,6 @@ def on_flow_stats_check_consistency(self, event):
+@@ -178,18 +174,6 @@ def on_flow_stats_check_consistency(self, event):
              if switch.dpid in self.stored_flows:
                  self.check_switch_consistency(switch)
  
@@ -120,10 +124,10 @@ index 99e6f3a..8eb28cf 100644
          """Check consistency of installed flows for a specific switch."""
          dpid = switch.dpid
 diff --git a/settings.py b/settings.py
-index f6e92b7..39fe317 100644
+index 31d5e34..1a59428 100644
 --- a/settings.py
 +++ b/settings.py
-@@ -4,9 +4,4 @@
+@@ -4,12 +4,7 @@
  FLOWS_DICT_MAX_SIZE = 10000
  # Time (in seconds) to wait retrieve box from storehouse
  BOX_RESTORE_TIMER = 0.1
@@ -134,11 +138,14 @@ index f6e92b7..39fe317 100644
 -#  CONSISTENCY_INTERVAL > 0 --> run periodically based on the interval
 -CONSISTENCY_INTERVAL = 0
 +ENABLE_CONSISTENCY_CHECK = True
+ 
+ # List of flows ignored by the consistency check
+ # To filter by a cookie or `table_id` use [value]
 
-From 3716e6f25cbdd8acd14a1541bbe04f3b9a98ab64 Mon Sep 17 00:00:00 2001
+From 887a4bc28c0bcb95450a64ea0f42efafd2844699 Mon Sep 17 00:00:00 2001
 From: Italo Valcy <italo@ampath.net>
 Date: Tue, 25 May 2021 14:49:06 -0300
-Subject: [PATCH 3/4] replacing obsolete CONSISTENCY_INTERVAL setting by
+Subject: [PATCH 3/6] replacing obsolete CONSISTENCY_INTERVAL setting by
  ENABLE_CONSISTENCY_CHECK
 
 ---
@@ -146,10 +153,10 @@ Subject: [PATCH 3/4] replacing obsolete CONSISTENCY_INTERVAL setting by
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/main.py b/main.py
-index 4b1e84d..17f649f 100644
+index 1d51653..b1983e4 100644
 --- a/main.py
 +++ b/main.py
-@@ -67,7 +67,7 @@ def shutdown(self):
+@@ -113,7 +113,7 @@ def shutdown(self):
      def resend_stored_flows(self, event):
          """Resend stored Flows."""
          # if consistency check is enabled, it should take care of this
@@ -159,10 +166,10 @@ index 4b1e84d..17f649f 100644
          switch = event.content['switch']
          dpid = str(switch.dpid)
 
-From 61117afe106dab56d7fb2709a25f00ba7c0a220c Mon Sep 17 00:00:00 2001
+From 6db7d01eccfb9617a5e0bf4c81b37bd91e61f1a3 Mon Sep 17 00:00:00 2001
 From: Italo Valcy <italo@ampath.net>
 Date: Tue, 25 May 2021 14:49:49 -0300
-Subject: [PATCH 4/4] fix unit test to consider ENABLE_CONSISTENCY_CHECK
+Subject: [PATCH 4/6] fix unit test to consider ENABLE_CONSISTENCY_CHECK
  instead of CONSISTENCY_INTERVAL
 
 ---
@@ -170,10 +177,10 @@ Subject: [PATCH 4/4] fix unit test to consider ENABLE_CONSISTENCY_CHECK
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/tests/unit/test_main.py b/tests/unit/test_main.py
-index 12db760..a58ead5 100644
+index badc950..12317be 100644
 --- a/tests/unit/test_main.py
 +++ b/tests/unit/test_main.py
-@@ -261,7 +261,7 @@ def test_load_flows(self, mock_storehouse):
+@@ -276,7 +276,7 @@ def test_load_flows(self, mock_storehouse):
          self.napp._load_flows()
          mock_storehouse.assert_called()
  
@@ -182,3 +189,70 @@ index 12db760..a58ead5 100644
      @patch("napps.kytos.flow_manager.main.Main._install_flows")
      def test_resend_stored_flows(self, mock_install_flows):
          """Test resend stored flows."""
+
+From 379e2ceea8bf4b185dbc157db620ec77056980d1 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Humberto=20Di=C3=B3genes?= <hdiogenes@gmail.com>
+Date: Wed, 26 May 2021 10:53:12 -0300
+Subject: [PATCH 5/6] Minor fixes
+
+---
+ main.py | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/main.py b/main.py
+index b1983e4..dccf1da 100644
+--- a/main.py
++++ b/main.py
+@@ -15,9 +15,9 @@
+ from napps.kytos.of_core.flow import FlowFactory
+ 
+ from .exceptions import InvalidCommandError
+-from .settings import ENABLE_CONSISTENCY_CHECK
+ from .settings import (CONSISTENCY_COOKIE_IGNORED_RANGE,
+-                       CONSISTENCY_TABLE_ID_IGNORED_RANGE, FLOWS_DICT_MAX_SIZE)
++                       CONSISTENCY_TABLE_ID_IGNORED_RANGE,
++                       ENABLE_CONSISTENCY_CHECK, FLOWS_DICT_MAX_SIZE)
+ 
+ 
+ def cast_fields(flow_dict):
+@@ -209,7 +209,7 @@ def check_storehouse_consistency(self, switch):
+ 
+         for installed_flow in switch.flows:
+ 
+-            # Check if the flow are in the ignored flow list
++            # Check if the flow is in the ignored flow list
+             if self.consistency_ignored_check(installed_flow):
+                 continue
+ 
+
+From 55ff2d109b6569b63f679c9990fa49eee56acf5d Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Humberto=20Di=C3=B3genes?= <hdiogenes@gmail.com>
+Date: Wed, 26 May 2021 10:58:01 -0300
+Subject: [PATCH 6/6] Apply suggestions from code review
+
+---
+ main.py | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/main.py b/main.py
+index dccf1da..6b9e457 100644
+--- a/main.py
++++ b/main.py
+@@ -113,7 +113,7 @@ def shutdown(self):
+     def resend_stored_flows(self, event):
+         """Resend stored Flows."""
+         # if consistency check is enabled, it should take care of this
+-        if ENABLE_CONSISTENCY_CHECK is True:
++        if ENABLE_CONSISTENCY_CHECK:
+             return
+         switch = event.content['switch']
+         dpid = str(switch.dpid)
+@@ -166,7 +166,7 @@ def consistency_ignored_check(self, flow):
+     @listen_to('kytos/of_core.flow_stats.received')
+     def on_flow_stats_check_consistency(self, event):
+         """Check the consistency of a switch upon receiving flow stats."""
+-        if ENABLE_CONSISTENCY_CHECK is False:
++        if not ENABLE_CONSISTENCY_CHECK:
+             return
+         switch = event.content['switch']
+         if switch.is_enabled():
