@@ -1,6 +1,8 @@
 # kytos-docker
 
-[Kytos SDN Platform](https://kytos.io) in a docker container with the main Napps used by [AmLight/AMPATH](https://www.amlight.net).
+[Kytos-NG SDN Platform](https://github.com/kytos-ng/) in a docker container with the main Napps used by [AmLight/AMPATH](https://www.amlight.net).
+
+**NOTE: Since Kytos project is in a "shutdown" phase, our docker image is based on the fork of the project - Kytos-NG (https://github.com/kytos-ng). The naming convention inside the docker image remains the same, but eventually they will be changed to kytos-ng in the future.**
 
 ## Usage
 
