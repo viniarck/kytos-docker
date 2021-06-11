@@ -1,0 +1,606 @@
+From 2e2abdf39e33ac1cdcb31e6f67994c50b1821e87 Mon Sep 17 00:00:00 2001
+From: Antonio Francisco <ajoaoff@gmail.com>
+Date: Mon, 7 Jun 2021 22:56:30 -0300
+Subject: [PATCH 1/3] Base classes for Instruction
+
+---
+ flow.py | 46 ++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 46 insertions(+)
+
+diff --git a/flow.py b/flow.py
+index fd0776f..fe8ec23 100644
+--- a/flow.py
++++ b/flow.py
+@@ -229,6 +229,52 @@ def __eq__(self, other):
+         return self.as_dict(include_id) == other.as_dict(include_id)
+ 
+ 
++class InstructionBase(ABC):
++    """Base class for Instructions."""
++
++    _action_factory = None
++
++    def as_dict(self):
++        """Return this instruction as a dict."""
++        return vars(self)
++
++    @classmethod
++    def from_dict(cls, instruction_dict):
++        """Return an action instance from attributes in a dictionary."""
++        instruction = cls(None)
++        for attr_name, value in instruction_dict.items():
++            if hasattr(instruction, attr_name):
++                if attr_name == 'actions':
++                    value = [cls._action_factory.from_dict(action_dict)
++                             for action_dict in value]
++                setattr(instruction, attr_name, value)
++        return instruction
++
++
++class InstructionFactoryBase(ABC):
++    """Deal with different instruction implementations."""
++
++    _instruction_class = {
++        'apply_actions': None
++    }
++
++    @classmethod
++    def from_dict(cls, instruction_dict):
++        """Build the proper instruction from a dictionary."""
++        instruction = instruction_dict.get('instruction_type')
++        instruction_class = cls._instruction_class[instruction]
++        return instruction_class.from_dict(instruction_dict) \
++            if instruction_class else None
++
++    @classmethod
++    def from_of_instruction(cls, of_instruction):
++        """Build the proper instruction from a dictionary."""
++        instruction = type(of_instruction)
++        instruction_class = cls._instruction_class[instruction]
++        return instruction_class.from_of_instruction(of_instruction) \
++            if instruction_class else None
++
++
+ class ActionBase(ABC):
+     """Base class for a flow action."""
+ 
+
+From e67c72ee06c07cdc95b58d7fa6013eac5c93de8b Mon Sep 17 00:00:00 2001
+From: Antonio Francisco <ajoaoff@gmail.com>
+Date: Mon, 7 Jun 2021 22:59:21 -0300
+Subject: [PATCH 2/3] Instruction classes in OpenFlow 1.3
+
+---
+ v0x04/flow.py | 144 ++++++++++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 141 insertions(+), 3 deletions(-)
+
+diff --git a/v0x04/flow.py b/v0x04/flow.py
+index 5e27ad8..bef234d 100644
+--- a/v0x04/flow.py
++++ b/v0x04/flow.py
+@@ -8,15 +8,28 @@
+ from pyof.v0x04.common.action import ActionSetField as OFActionSetField
+ from pyof.v0x04.common.action import ActionSetQueue as OFActionSetQueue
+ from pyof.v0x04.common.action import ActionType
+-from pyof.v0x04.common.flow_instructions import (InstructionApplyAction,
+-                                                 InstructionType)
++from pyof.v0x04.common.flow_instructions import \
++    InstructionApplyAction as OFInstructionApplyAction
++from pyof.v0x04.common.flow_instructions import \
++    InstructionClearAction as OFInstructionClearAction
++from pyof.v0x04.common.flow_instructions import \
++    InstructionGotoTable as OFInstructionGotoTable
++from pyof.v0x04.common.flow_instructions import \
++    InstructionMeter as OFInstructionMeter
++from pyof.v0x04.common.flow_instructions import InstructionType
++from pyof.v0x04.common.flow_instructions import \
++    InstructionWriteAction as OFInstructionWriteAction
++from pyof.v0x04.common.flow_instructions import \
++    InstructionWriteMetadata as OFInstructionWriteMetadata
+ from pyof.v0x04.common.flow_match import Match as OFMatch
+ from pyof.v0x04.common.flow_match import (OxmMatchFields, OxmOfbMatchField,
+                                           OxmTLV, VlanId)
+ from pyof.v0x04.controller2switch.flow_mod import FlowMod
+ 
+ from napps.kytos.of_core.flow import (ActionBase, ActionFactoryBase, FlowBase,
+-                                      FlowStats, MatchBase, PortStats)
++                                      FlowStats, InstructionBase,
++                                      InstructionFactoryBase, MatchBase,
++                                      PortStats)
+ from napps.kytos.of_core.v0x04.match_fields import MatchFieldFactory
+ 
+ __all__ = ('ActionOutput', 'ActionSetVlan', 'ActionSetQueue', 'ActionPushVlan',
+@@ -179,6 +192,131 @@ class Action(ActionFactoryBase):
+     }
+ 
+ 
++class InstructionAction(InstructionBase):
++    """Base class for instruction dealing with actions."""
++
++    _action_factory = Action
++    _instruction_type = None
++    _of_instruction_class = None
++
++    def __init__(self, actions=None):
++        self.instruction_type = self._instruction_type
++        self.actions = actions or []
++
++    def as_dict(self):
++        instruction_dict = {'instruction_type': self.instruction_type}
++        instruction_dict['actions'] = [action.as_dict()
++                                       for action in self.actions]
++        return instruction_dict
++
++    @classmethod
++    def from_of_instruction(cls, of_instruction):
++        """Create high-level Instruction from pyof Instruction."""
++        actions = [Action.from_of_action(of_action)
++                   for of_action in of_instruction.actions]
++        return cls(actions)
++
++    def as_of_instruction(self):
++        """Return a pyof Instruction instance."""
++        of_actions = [action.as_of_action() for action in self.actions]
++        # Disable not-callable error as subclasses will set a class
++        # pylint: disable=not-callable
++        return self._of_instruction_class(of_actions)
++
++
++class InstructionApplyAction(InstructionAction):
++    """Instruct switch to apply the actions."""
++
++    _instruction_type = 'apply_actions'
++    _of_instruction_class = OFInstructionApplyAction
++
++
++class InstructionClearAction(InstructionAction):
++    """Instruct switch to clear the actions."""
++
++    _instruction_type = 'clear_actions'
++    _of_instruction_class = OFInstructionClearAction
++
++
++class InstructionWriteAction(InstructionAction):
++    """Instruct switch to write the actions."""
++
++    _instruction_type = 'write_actions'
++    _of_instruction_class = OFInstructionWriteAction
++
++
++class InstructionGotoTable(InstructionBase):
++    """Instruct the switch to move to another table."""
++
++    def __init__(self, table_id=0):
++        self.instruction_type = 'goto_table'
++        self.table_id = table_id
++
++    @classmethod
++    def from_of_instruction(cls, of_instruction):
++        """Create high-level Instruction from pyof Instruction."""
++        return cls(table_id=of_instruction.table_id.value)
++
++    def as_of_instruction(self):
++        """Return a pyof Instruction instance."""
++        return OFInstructionGotoTable(self.table_id)
++
++
++class InstructionMeter(InstructionBase):
++    """Instruct the switch to apply a meter."""
++
++    def __init__(self, meter_id=0):
++        self.instruction_type = 'meter'
++        self.meter_id = meter_id
++
++    @classmethod
++    def from_of_instruction(cls, of_instruction):
++        """Create high-level Instruction from pyof Instruction."""
++        return cls(meter_id=of_instruction.meter_id.value)
++
++    def as_of_instruction(self):
++        """Return a pyof Instruction instance."""
++        return OFInstructionMeter(self.meter_id)
++
++
++class InstructionWriteMetadata(InstructionBase):
++    """Instruct the switch to write metadata."""
++
++    def __init__(self, metadata=0, metadata_mask=0):
++        self.instruction_type = 'write_metadata'
++        self.metadata = metadata
++        self.metadata_mask = metadata_mask
++
++    @classmethod
++    def from_of_instruction(cls, of_instruction):
++        """Create high-level Instruction from pyof Instruction."""
++        return cls(metadata=of_instruction.metadata.value,
++                   metadata_mask=of_instruction.metadata_mask.value)
++
++    def as_of_instruction(self):
++        """Return a pyof Instruction instance."""
++        return OFInstructionWriteMetadata(self.metadata, self.metadata_mask)
++
++
++class Instruction(InstructionFactoryBase):
++    """An instruction the flow executes."""
++
++    _instruction_class = {
++        'apply_actions': InstructionApplyAction,
++        OFInstructionApplyAction: InstructionApplyAction,
++        'clear_actions': InstructionClearAction,
++        OFInstructionClearAction: InstructionClearAction,
++        'goto_table': InstructionGotoTable,
++        OFInstructionGotoTable: InstructionGotoTable,
++        'meter': InstructionMeter,
++        OFInstructionMeter: InstructionMeter,
++        'write_actions': InstructionWriteAction,
++        OFInstructionWriteAction: InstructionWriteAction,
++        'write_metadata': InstructionWriteMetadata,
++        OFInstructionWriteMetadata: InstructionWriteMetadata
++    }
++
++
+ class Flow(FlowBase):
+     """High-level flow representation for OpenFlow 1.0.
+ 
+
+From a87e7e0be0b3dba3c5a2496aae7aaaa799737f6d Mon Sep 17 00:00:00 2001
+From: Antonio Francisco <ajoaoff@gmail.com>
+Date: Mon, 7 Jun 2021 23:02:07 -0300
+Subject: [PATCH 3/3] Modified flows to support instructions.
+
+Actions are dealt in OF 1.0 subclass and instructions in
+OF 1.3 subclass.
+Fixes #14
+---
+ flow.py                 |  17 +-----
+ tests/unit/test_flow.py | 126 +++++++++++++++++++++++++++++++++-------
+ v0x01/flow.py           |  36 ++++++++++++
+ v0x04/flow.py           |  46 +++++++++++++--
+ 4 files changed, 184 insertions(+), 41 deletions(-)
+
+diff --git a/flow.py b/flow.py
+index fe8ec23..bbe69a8 100644
+--- a/flow.py
++++ b/flow.py
+@@ -51,8 +51,7 @@ class FlowBase(ABC):  # pylint: disable=too-many-instance-attributes
+     _match_class = None
+ 
+     def __init__(self, switch, table_id=0x0, match=None, priority=0x8000,
+-                 idle_timeout=0, hard_timeout=0, cookie=0, actions=None,
+-                 stats=None):
++                 idle_timeout=0, hard_timeout=0, cookie=0, stats=None):
+         """Assign parameters to attributes.
+ 
+         Args:
+@@ -77,7 +76,6 @@ def __init__(self, switch, table_id=0x0, match=None, priority=0x8000,
+         self.idle_timeout = idle_timeout
+         self.hard_timeout = hard_timeout
+         self.cookie = cookie
+-        self.actions = actions or []
+         self.stats = stats or FlowStats()  # pylint: disable=E1102
+ 
+     @property
+@@ -117,7 +115,7 @@ def as_dict(self, include_id=True):
+             'idle_timeout': self.idle_timeout,
+             'hard_timeout': self.hard_timeout,
+             'cookie': self.cookie,
+-            'actions': [action.as_dict() for action in self.actions]}
++        }
+         if include_id:
+             # Avoid infinite recursion
+             flow_dict['id'] = self.id
+@@ -143,12 +141,6 @@ def from_dict(cls, flow_dict, switch):
+         # Version-specific attributes
+         if 'match' in flow_dict:
+             flow.match = cls._match_class.from_dict(flow_dict['match'])
+-        if 'actions' in flow_dict:
+-            flow.actions = []
+-            for action_dict in flow_dict['actions']:
+-                action = cls._action_factory.from_dict(action_dict)
+-                if action:
+-                    flow.actions.append(action)
+ 
+         return flow
+ 
+@@ -206,10 +198,6 @@ def _get_of_actions(of_flow_stats):
+     @classmethod
+     def from_of_flow_stats(cls, of_flow_stats, switch):
+         """Create a flow with latest stats based on pyof FlowStats."""
+-        of_actions = cls._get_of_actions(of_flow_stats)
+-        actions = (cls._action_factory.from_of_action(of_action)
+-                   for of_action in of_actions)
+-        non_none_actions = [action for action in actions if action]
+         return cls(switch,
+                    table_id=of_flow_stats.table_id.value,
+                    match=cls._match_class.from_of_match(of_flow_stats.match),
+@@ -217,7 +205,6 @@ def from_of_flow_stats(cls, of_flow_stats, switch):
+                    idle_timeout=of_flow_stats.idle_timeout.value,
+                    hard_timeout=of_flow_stats.hard_timeout.value,
+                    cookie=of_flow_stats.cookie.value,
+-                   actions=non_none_actions,
+                    stats=FlowStats.from_of_flow_stats(of_flow_stats))
+ 
+     def __eq__(self, other):
+diff --git a/tests/unit/test_flow.py b/tests/unit/test_flow.py
+index a98baa5..b42c9d0 100644
+--- a/tests/unit/test_flow.py
++++ b/tests/unit/test_flow.py
+@@ -47,19 +47,99 @@ class TestFlow(TestCase):
+ 
+     mock_switch = get_switch_mock("00:00:00:00:00:00:00:01")
+     mock_switch.id = "00:00:00:00:00:00:00:01"
+-    expected = {'switch': mock_switch.id,
+-                'table_id': 1,
+-                'match': {
+-                    'dl_src': '11:22:33:44:55:66'
+-                },
+-                'priority': 2,
+-                'idle_timeout': 3,
+-                'hard_timeout': 4,
+-                'cookie': 5,
+-                'actions': [
+-                    {'action_type': 'set_vlan',
+-                     'vlan_id': 6}],
+-                'stats': {}}
++    requested = {
++        'switch': mock_switch.id,
++        'table_id': 1,
++        'match': {
++            'dl_src': '11:22:33:44:55:66'
++        },
++        'priority': 2,
++        'idle_timeout': 3,
++        'hard_timeout': 4,
++        'cookie': 5,
++        'actions': [{
++            'action_type': 'set_vlan',
++            'vlan_id': 6
++        }]
++    }
++    expected_10 = {
++        'switch': mock_switch.id,
++        'table_id': 1,
++        'match': {
++            'dl_src': '11:22:33:44:55:66'
++        },
++        'priority': 2,
++        'idle_timeout': 3,
++        'hard_timeout': 4,
++        'cookie': 5,
++        'actions': [{
++            'action_type': 'set_vlan',
++            'vlan_id': 6
++        }],
++        'stats': {}
++    }
++    expected_13 = {
++        'switch': mock_switch.id,
++        'table_id': 1,
++        'match': {
++            'dl_src': '11:22:33:44:55:66'
++        },
++        'priority': 2,
++        'idle_timeout': 3,
++        'hard_timeout': 4,
++        'cookie': 5,
++        'cookie_mask': 0,
++        'instructions': [{
++            'instruction_type': 'apply_actions',
++            'actions': [{
++                'action_type': 'set_vlan',
++                'vlan_id': 6
++                }]
++            }],
++        'stats': {}
++    }
++    requested_instructions = {
++        'switch': mock_switch.id,
++        'table_id': 1,
++        'match': {
++            'dl_src': '11:22:33:44:55:66'
++        },
++        'priority': 2,
++        'idle_timeout': 3,
++        'hard_timeout': 4,
++        'cookie': 5,
++        'cookie_mask': 0,
++        'instructions': [
++            {
++                'instruction_type': 'apply_actions',
++                'actions': [{
++                    'action_type': 'set_vlan',
++                    'vlan_id': 2
++                }]
++            },
++            {
++                'instruction_type': 'goto_table',
++                'table_id': 1
++            }
++
++        ]
++    }
++
++    @patch('napps.kytos.of_core.flow.v0x01')
++    @patch('napps.kytos.of_core.flow.v0x04')
++    @patch('napps.kytos.of_core.flow.json.dumps')
++    def test_flow_mod_goto(self, *args):
++        """Convert a dict to flow and vice-versa."""
++        (mock_json, _, _) = args
++        dpid = "00:00:00:00:00:00:00:01"
++        mock_json.return_value = str(self.requested_instructions)
++        mock_switch = get_switch_mock(dpid, 0x04)
++        mock_switch.id = dpid
++        flow = Flow04.from_dict(self.requested_instructions, mock_switch)
++        actual = flow.as_dict()
++        del actual['id']
++        del actual['stats']
++        self.assertDictEqual(self.requested_instructions, actual)
+ 
+     @patch('napps.kytos.of_core.flow.v0x01')
+     @patch('napps.kytos.of_core.flow.v0x04')
+@@ -68,15 +148,17 @@ def test_flow_mod(self, *args):
+         """Convert a dict to flow and vice-versa."""
+         (mock_json, _, _) = args
+         dpid = "00:00:00:00:00:00:00:01"
+-        mock_json.return_value = str(self.expected)
+-        for flow_class, version in [(Flow04, 0x01), (Flow04, 0x04)]:
++        mock_json.return_value = str(self.requested)
++        for flow_class, version, expected in \
++            [(Flow01, 0x01, self.expected_10),
++             (Flow04, 0x04, self.expected_13)]:
+             with self.subTest(flow_class=flow_class):
+                 mock_switch = get_switch_mock(dpid, version)
+                 mock_switch.id = dpid
+-                flow = flow_class.from_dict(self.expected, mock_switch)
++                flow = flow_class.from_dict(self.requested, mock_switch)
+                 actual = flow.as_dict()
+                 del actual['id']
+-                self.assertDictEqual(self.expected, actual)
++                self.assertDictEqual(expected, actual)
+ 
+     @patch('napps.kytos.of_core.flow.FlowBase._as_of_flow_mod')
+     def test_of_flow_mod(self, mock_flow_mod):
+@@ -84,7 +166,7 @@ def test_of_flow_mod(self, mock_flow_mod):
+ 
+         for flow_class in Flow01, Flow04:
+             with self.subTest(flow_class=flow_class):
+-                flow = flow_class.from_dict(self.expected, self.mock_switch)
++                flow = flow_class.from_dict(self.requested, self.mock_switch)
+                 flow.as_of_add_flow_mod()
+                 mock_flow_mod.assert_called()
+ 
+@@ -97,14 +179,14 @@ def test_as_of_flow_mod(self):
+         mock_command = MagicMock()
+         for flow_class in Flow01, Flow04:
+             with self.subTest(flow_class=flow_class):
+-                flow_mod = flow_class.from_dict(self.expected,
++                flow_mod = flow_class.from_dict(self.requested,
+                                                 self.mock_switch)
+                 response = flow_mod._as_of_flow_mod(mock_command)
+-                self.assertEqual(response.cookie, self.expected['cookie'])
++                self.assertEqual(response.cookie, self.requested['cookie'])
+                 self.assertEqual(response.idle_timeout,
+-                                 self.expected['idle_timeout'])
++                                 self.requested['idle_timeout'])
+                 self.assertEqual(response.hard_timeout,
+-                                 self.expected['hard_timeout'])
++                                 self.requested['hard_timeout'])
+ 
+ 
+ class TestFlowBase(TestCase):
+diff --git a/v0x01/flow.py b/v0x01/flow.py
+index a27c4c5..8e5593f 100644
+--- a/v0x01/flow.py
++++ b/v0x01/flow.py
+@@ -105,6 +105,31 @@ class Flow(FlowBase):
+     _flow_mod_class = FlowMod
+     _match_class = Match
+ 
++    def __init__(self, *args, **kwargs):
++        """Create a flow with actions."""
++        actions = kwargs.pop('actions', None)
++        super().__init__(*args, **kwargs)
++        self.actions = actions or []
++
++    def as_dict(self, include_id=True):
++        """Representation of this flow as a dictionary."""
++        flow_dict = super().as_dict(include_id=include_id)
++        flow_dict['actions'] = [action.as_dict() for action in self.actions]
++
++        return flow_dict
++
++    @classmethod
++    def from_dict(cls, flow_dict, switch):
++        """Create a flow from a dictionary."""
++        flow = super().from_dict(flow_dict, switch)
++        if 'actions' in flow_dict:
++            flow.actions = []
++            for action_dict in flow_dict['actions']:
++                action = cls._action_factory.from_dict(action_dict)
++                if action:
++                    flow.actions.append(action)
++        return flow
++
+     @staticmethod
+     def _get_of_actions(of_flow_stats):
+         """Return the pyof actions from pyof ``FlowStats.actions``."""
+@@ -115,3 +140,14 @@ def _as_of_flow_mod(self, command):
+         flow_mod = super()._as_of_flow_mod(command)
+         flow_mod.actions = [action.as_of_action() for action in self.actions]
+         return flow_mod
++
++    @classmethod
++    def from_of_flow_stats(cls, of_flow_stats, switch):
++        """Create a flow with latest stats based on pyof FlowStats."""
++        of_actions = cls._get_of_actions(of_flow_stats)
++        actions = (cls._action_factory.from_of_action(of_action)
++                   for of_action in of_actions)
++        non_none_actions = [action for action in actions if action]
++        flow = super().from_of_flow_stats(of_flow_stats, switch)
++        flow.actions = non_none_actions
++        return flow
+diff --git a/v0x04/flow.py b/v0x04/flow.py
+index bef234d..b1aa350 100644
+--- a/v0x04/flow.py
++++ b/v0x04/flow.py
+@@ -327,10 +327,40 @@ class Flow(FlowBase):
+     _flow_mod_class = FlowMod
+     _match_class = Match
+ 
+-    def __init__(self, *args, cookie_mask=0, **kwargs):
++    def __init__(self, *args, **kwargs):
+         """Require a cookie mask."""
++        cookie_mask = kwargs.pop('cookie_mask', 0)
++        instructions = kwargs.pop('instructions', None)
+         super().__init__(*args, **kwargs)
+         self.cookie_mask = cookie_mask
++        self.instructions = instructions or []
++
++    def as_dict(self, include_id=True):
++        """Return a representation of a Flow as a dictionary."""
++        flow_dict = super().as_dict(include_id=include_id)
++        flow_dict['cookie_mask'] = self.cookie_mask
++        flow_dict['instructions'] = [instruction.as_dict() for
++                                     instruction in self.instructions]
++        return flow_dict
++
++    @classmethod
++    def from_dict(cls, flow_dict, switch):
++        """Create a Flow instance from a dictionary."""
++        flow = super().from_dict(flow_dict, switch)
++        flow.instructions = []
++        if 'actions' in flow_dict:
++            instruction_apply_actions = InstructionApplyAction()
++            for action_dict in flow_dict['actions']:
++                action = cls._action_factory.from_dict(action_dict)
++                if action:
++                    instruction_apply_actions.actions.append(action)
++            flow.instructions.append(instruction_apply_actions)
++        if 'instructions' in flow_dict:
++            for instruction_dict in flow_dict['instructions']:
++                instruction = Instruction.from_dict(instruction_dict)
++                if instruction:
++                    flow.instructions.append(instruction)
++        return flow
+ 
+     @staticmethod
+     def _get_of_actions(of_flow_stats):
+@@ -350,7 +380,15 @@ def _as_of_flow_mod(self, command):
+         """
+         of_flow_mod = super()._as_of_flow_mod(command)
+         of_flow_mod.cookie_mask = self.cookie_mask
+-        of_actions = [action.as_of_action() for action in self.actions]
+-        of_instruction = InstructionApplyAction(actions=of_actions)
+-        of_flow_mod.instructions = [of_instruction]
++        of_flow_mod.instructions = [instruction.as_of_instruction() for
++                                    instruction in self.instructions]
+         return of_flow_mod
++
++    @classmethod
++    def from_of_flow_stats(cls, of_flow_stats, switch):
++        """Create a flow with latest stats based on pyof FlowStats."""
++        instructions = [Instruction.from_of_instruction(of_instruction)
++                        for of_instruction in of_flow_stats.instructions]
++        flow = super().from_of_flow_stats(of_flow_stats, switch)
++        flow.instructions = instructions
++        return flow

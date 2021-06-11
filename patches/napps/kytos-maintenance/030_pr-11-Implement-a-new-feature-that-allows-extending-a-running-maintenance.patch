@@ -1,0 +1,126 @@
+From 1a1202cebfd3e94380d496a32ac75dcbd64db34d Mon Sep 17 00:00:00 2001
+From: Antonio Francisco <ajoaoff@gmail.com>
+Date: Thu, 10 Jun 2021 15:17:04 -0300
+Subject: [PATCH] Fix openapi.yml
+
+---
+ openapi.yml | 75 +++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 75 insertions(+)
+
+diff --git a/openapi.yml b/openapi.yml
+index 4ee5819..7db802a 100644
+--- a/openapi.yml
++++ b/openapi.yml
+@@ -157,6 +157,44 @@ paths:
+           description: Maintenance window not found.
+         '415':
+           description: No JSON in request.
++  '/maintenance/{mw_id}/extend':
++    patch:
++      tags:
++        - Update
++      summary: Extend the duration of a running maintenance
++      parameters:
++        - name: mw_id
++          in: path
++          required: true
++          schema:
++            type: string
++          description: Maintenance window ID
++      requestBody:
++        description: Minutes to extend the maintenance
++        required: true
++        content:
++          application/json:
++            schema:
++              type: object
++              properties:
++                minutes:
++                  type: integer        
++      responses:
++        '200':
++          description: Maintenance window succesfully extended
++          content:
++            application/json:
++              schema:
++                type: object
++                properties:
++                  response:
++                    type: string
++        '400':
++          $ref: '#/components/responses/BadRequest'
++        '404':
++          $ref: '#/components/responses/NotFound'
++        '415':
++          $ref: '#/components/responses/UnsupportedMediaType'
+   '/maintenance/report':
+     post:
+       tags:
+@@ -182,9 +220,43 @@ paths:
+         '400':
+            description: Invalid JSON.
+ components:
++  responses:
++    NotFound:
++      description: The specified resource was not found
++      content:
++        application/json:
++          schema:
++            $ref: '#/components/schemas/ErrorMessage'
++    BadRequest:
++      description: Received data is invalid
++      content:
++        application/json:
++          schema:
++            $ref: '#/components/schemas/ErrorMessage'
++    UnsupportedMediaType:
++      description: The content-type is not supported
++      content:
++        application/json:
++          schema:
++            $ref: '#/components/schemas/ErrorMessage'
+   schemas:
++    ErrorMessage:
++      additionalProperties: false
++      type: object
++      properties:
++        code:
++          type: integer
++        name:
++          type: string
++        description:
++          type: string
++      required:
++        - code
++        - name
++        - description
+     MaintenanceWindow:
+       type: object
++      additionalProperties: false
+       properties:
+         id:
+           type: string
+@@ -206,6 +278,7 @@ components:
+               - $ref: '#/components/schemas/Link'
+     Tag: # Can be referenced via '#/components/schemas/Tag'
+       type: object
++      additionalProperties: false
+       required:
+         - tag_type
+         - value
+@@ -216,6 +289,7 @@ components:
+           type: string
+     Endpoint: # Can be referenced via '#/components/schemas/Endpoint'
+       type: object
++      additionalProperties: false
+       required:
+         - interface_id
+       properties:
+@@ -226,6 +300,7 @@ components:
+           $ref: '#/components/schemas/Tag'
+     Link: # Can be referenced via '#/components/schemas/Link'
+       type: object
++      additionalProperties: false
+       required:
+         - id
+         - endpoint_a
