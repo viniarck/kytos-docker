@@ -1,0 +1,159 @@
+From 89316a89db149dd70ddb870aedafffd47db863cc Mon Sep 17 00:00:00 2001
+From: Antonio Francisco <ajoaoff@gmail.com>
+Date: Thu, 29 Jul 2021 14:43:12 -0300
+Subject: [PATCH 1/2] Listen to maintenance events for interfaces Fixes #8
+
+---
+ main.py                 | 23 +++++++++++++++++++++--
+ tests/unit/test_main.py | 40 ++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 61 insertions(+), 2 deletions(-)
+
+diff --git a/main.py b/main.py
+index 70c7f28..24ea4cf 100644
+--- a/main.py
++++ b/main.py
+@@ -860,7 +860,7 @@ def update_instance_metadata(self, obj):
+ 
+     @listen_to('kytos/maintenance.start_link')
+     def handle_link_maintenance_start(self, event):
+-        """Deals with the start of links maintenance."""
++        """Deal with the start of links maintenance."""
+         notify_links = []
+         maintenance_links = event.content['links']
+         for maintenance_link in maintenance_links:
+@@ -880,7 +880,7 @@ def handle_link_maintenance_start(self, event):
+ 
+     @listen_to('kytos/maintenance.end_link')
+     def handle_link_maintenance_end(self, event):
+-        """Deals with the end of links maintenance."""
++        """Deal with the end of links maintenance."""
+         notify_links = []
+         maintenance_links = event.content['links']
+         for maintenance_link in maintenance_links:
+@@ -897,3 +897,22 @@ def handle_link_maintenance_end(self, event):
+             link.endpoint_a.enable()
+             link.endpoint_b.enable()
+             self.notify_link_status_change(link)
++
++    @listen_to('kytos/maintenance.start_uni')
++    def handle_uni_maintenance_start(self, event):
++        """Deal with the start of UNIs maintenance."""
++        maintenance_unis = event.content['unis']
++        for maintenance_uni in maintenance_unis:
++            maintenance_uni.interface.disable()
++            if maintenance_uni.interface.is_active():
++                self.handle_link_down(maintenance_uni.interface)
++        self.notify_topology_update()
++
++    @listen_to('kytos/maintenance.end_uni')
++    def handle_uni_maintenance_end(self, event):
++        """Deal with the end of links maintenance."""
++        maintenance_unis = event.content['unis']
++        for maintenance_uni in maintenance_unis:
++            maintenance_uni.interface.enable()
++            self.handle_link_up(maintenance_uni.interface)
++        self.notify_topology_update()
+diff --git a/tests/unit/test_main.py b/tests/unit/test_main.py
+index 7d98502..0c09342 100644
+--- a/tests/unit/test_main.py
++++ b/tests/unit/test_main.py
+@@ -41,6 +41,8 @@ def test_get_event_listeners(self):
+                            'kytos/maintenance.end_link',
+                            'kytos/maintenance.start_switch',
+                            'kytos/maintenance.end_switch',
++                           'kytos/maintenance.start_uni',
++                           'kytos/maintenance.end_uni',
+                            '.*.network_status.updated',
+                            '.*.interface.is.nni',
+                            '.*.connection.lost',
+@@ -1101,3 +1103,41 @@ def test_handle_switch_maintenance_end(self, handle_link_up_mock):
+         event.content = content
+         self.napp.handle_switch_maintenance_end(event)
+         self.assertEqual(handle_link_up_mock.call_count, 5)
++
++    @patch('napps.kytos.topology.main.Main.handle_link_down')
++    def test_handle_uni_maintenance_start(self, handle_link_down_mock):
++        """Test handle_uni_maintenance_start."""
++        uni1 = MagicMock()
++        uni1.interface.is_active.return_value = True
++        uni2 = MagicMock()
++        uni2.interface.is_active.return_value = False
++        uni3 = MagicMock()
++        uni3.interface.is_active.return_value = True
++        uni4 = MagicMock()
++        uni4.interface.is_active.return_value = False
++        uni5 = MagicMock()
++        uni5.interface.is_active.return_value = True
++        content = {'unis': [uni1, uni2, uni3, uni4, uni5]}
++        event = MagicMock()
++        event.content = content
++        self.napp.handle_uni_maintenance_start(event)
++        self.assertEqual(handle_link_down_mock.call_count, 3)
++
++    @patch('napps.kytos.topology.main.Main.handle_link_up')
++    def test_handle_uni_maintenance_end(self, handle_link_up_mock):
++        """Test handle_uni_maintenance_end."""
++        uni1 = MagicMock()
++        uni1.interface.is_active.return_value = True
++        uni2 = MagicMock()
++        uni2.interface.is_active.return_value = False
++        uni3 = MagicMock()
++        uni3.interface.is_active.return_value = True
++        uni4 = MagicMock()
++        uni4.interface.is_active.return_value = False
++        uni5 = MagicMock()
++        uni5.interface.is_active.return_value = True
++        content = {'unis': [uni1, uni2, uni3, uni4, uni5]}
++        event = MagicMock()
++        event.content = content
++        self.napp.handle_uni_maintenance_end(event)
++        self.assertEqual(handle_link_up_mock.call_count, 5)
+
+From cf6683ed796988b079d09014faae2bb0dbe5b1c4 Mon Sep 17 00:00:00 2001
+From: Antonio Francisco <ajoaoff@gmail.com>
+Date: Thu, 29 Jul 2021 14:47:23 -0300
+Subject: [PATCH 2/2] Remove unecessary github actions
+
+---
+ .github/workflows/main.yml | 32 --------------------------------
+ 1 file changed, 32 deletions(-)
+ delete mode 100644 .github/workflows/main.yml
+
+diff --git a/.github/workflows/main.yml b/.github/workflows/main.yml
+deleted file mode 100644
+index 952ae42..0000000
+--- a/.github/workflows/main.yml
++++ /dev/null
+@@ -1,32 +0,0 @@
+-# This is a basic workflow to help you get started with Actions
+-
+-name: Copy OpenAPI to GitHub Pages
+-
+-# Controls when the action will run. 
+-on:
+-  # Triggers the workflow on push or pull request events but only for the master branch
+-  push:
+-    branches: [ master ]
+-  # Allows you to run this workflow manually from the Actions tab
+-  workflow_dispatch:
+-
+-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+-jobs:
+-  copy-file:
+-    # The type of runner that the job will run on
+-    runs-on: ubuntu-latest
+-
+-    # Steps represent a sequence of tasks that will be executed as part of the job
+-    steps:
+-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+-      - uses: actions/checkout@v2
+-
+-      # Runs a single command using the runners shell
+-      - name: Pushes openapi.yml
+-        uses: dmnemec/copy_file_to_another_repo_action@v1.1.1
+-        with:
+-          source_file: 'openapi.yml'
+-          destination_repo: 'kytos-ng/kytos-ng.github.io'
+-          destination_folder: 'topology'
+-          destination_branch: 'master'
+-          commit_message: 'Pushing topology openapi.yml'
