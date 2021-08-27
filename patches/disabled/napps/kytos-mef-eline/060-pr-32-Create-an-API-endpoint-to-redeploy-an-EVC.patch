@@ -1,0 +1,214 @@
+From 2f05cf56f910619c0c9f7ea035f4e5fb7c1fa774 Mon Sep 17 00:00:00 2001
+From: Antonio Francisco <ajoaoff@gmail.com>
+Date: Tue, 3 Aug 2021 21:28:27 -0300
+Subject: [PATCH 1/4] API definition of the redeploy method
+
+---
+ openapi.yml | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/openapi.yml b/openapi.yml
+index f7caa98..edf2a40 100644
+--- a/openapi.yml
++++ b/openapi.yml
+@@ -113,6 +113,23 @@ paths:
+         '200':
+           description: OK
+ 
++  /v2/evc/{circuit_id}/redeploy:
++    patch:
++      summary: Redeploy a circuit
++      description: Redeploy a circuit removing and then recreating the flows.
++      operationId: redeploy
++      parameters:
++        - name: circuit_id
++          in: path
++          required: true
++          schema:
++            type: string
++      responses:
++        '202':
++          description: Accepted
++        '409':
++          description: Circuit disabled
++
+   /v2/evc/schedule/:
+     get:
+       summary: List all schedules stored for all circuits .
+
+From 15707f7dd4256534859bbe470514c39caa6c43c5 Mon Sep 17 00:00:00 2001
+From: Antonio Francisco <ajoaoff@gmail.com>
+Date: Thu, 12 Aug 2021 17:47:47 -0300
+Subject: [PATCH 2/4] Change description
+
+---
+ openapi.yml | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/openapi.yml b/openapi.yml
+index edf2a40..6c8fd3a 100644
+--- a/openapi.yml
++++ b/openapi.yml
+@@ -115,8 +115,8 @@ paths:
+ 
+   /v2/evc/{circuit_id}/redeploy:
+     patch:
+-      summary: Redeploy a circuit
+-      description: Redeploy a circuit removing and then recreating the flows.
++      summary: Redeploy an EVC
++      description: Redeploy an EVC removing and then recreating the flows.
+       operationId: redeploy
+       parameters:
+         - name: circuit_id
+
+From bf3e18e0f5e84fe7c607f9b661525b2ec2bc20e0 Mon Sep 17 00:00:00 2001
+From: Antonio Francisco <ajoaoff@gmail.com>
+Date: Thu, 12 Aug 2021 18:20:16 -0300
+Subject: [PATCH 3/4] Method to redeploy an EVC
+
+New method to redeploy an EVC. The action is
+taken only if the EVC is enabled.
+Fixes #31
+---
+ main.py                 | 28 +++++++++++++++++++++++++---
+ tests/unit/test_main.py | 36 ++++++++++++++++++++++++++++++++++++
+ 2 files changed, 61 insertions(+), 3 deletions(-)
+
+diff --git a/main.py b/main.py
+index 39b571d..d5cbba4 100644
+--- a/main.py
++++ b/main.py
+@@ -271,6 +271,28 @@ def delete_circuit(self, circuit_id):
+         emit_event(self.controller, 'deleted', evc_id=evc.id)
+         return jsonify(result), status
+ 
++    @rest('/v2/evc/<circuit_id>/redeploy', methods=['PATCH'])
++    def redeploy(self, circuit_id):
++        """Endpoint to force the redeployment of an EVC
++        """
++        log.debug('redeploy /v2/evc/%s/redeploy', circuit_id)
++        try:
++            evc = self.circuits[circuit_id]
++        except KeyError:
++            result = f'circuit_id {circuit_id} not found'
++            raise NotFound(result)
++        if evc.is_enabled():
++            with evc.lock:
++                evc.remove_current_flows()
++                evc.deploy()
++            result = {'response': f'Circuit {circuit_id} redeploy received.'}
++            status = 202
++        else:
++            result = {'response': f'Circuit {circuit_id} is disabled.'}
++            status = 409
++
++        return jsonify(result), status
++
+     @rest('/v2/evc/schedule', methods=['GET'])
+     def list_schedules(self):
+         """Endpoint to return all schedules stored for all circuits.
+@@ -320,7 +342,7 @@ def create_schedule(self):
+         """
+         log.debug('create_schedule /v2/evc/schedule/')
+ 
+-        json_data = self.json_from_request('create_schedule')
++        json_data = self._json_from_request('create_schedule')
+         try:
+             circuit_id = json_data['circuit_id']
+         except TypeError:
+@@ -407,7 +429,7 @@ def update_schedule(self, schedule_id):
+             log.debug('update_schedule result %s %s', result, 403)
+             raise Forbidden(result)
+ 
+-        data = self.json_from_request('update_schedule')
++        data = self._json_from_request('update_schedule')
+ 
+         new_schedule = CircuitSchedule.from_dict(data)
+         new_schedule.id = found_schedule.id
+@@ -702,7 +724,7 @@ def _get_circuits_buffer(self):
+         return self.circuits
+ 
+     @staticmethod
+-    def json_from_request(caller):
++    def _json_from_request(caller):
+         """Return a json from request.
+ 
+         If it was not possible to get a json from the request, log, for debug,
+diff --git a/tests/unit/test_main.py b/tests/unit/test_main.py
+index 7ff7137..665bc33 100644
+--- a/tests/unit/test_main.py
++++ b/tests/unit/test_main.py
+@@ -60,6 +60,9 @@ def test_verify_api_urls(self):
+             ({'circuit_id': '[circuit_id]'}, {'OPTIONS', 'PATCH'},
+              '/api/kytos/mef_eline/v2/evc/<circuit_id>'),
+ 
++            ({'circuit_id': '[circuit_id]'}, {'OPTIONS', 'PATCH'},
++             '/api/kytos/mef_eline/v2/evc/<circuit_id>/redeploy'),
++
+             ({}, {'OPTIONS', 'GET', 'HEAD'},
+              '/api/kytos/mef_eline/v2/evc/schedule'),
+ 
+@@ -712,6 +715,39 @@ def test_load_circuits_by_interface(self):
+         # pylint: disable=protected-access
+         self.assertEqual(self.napp._circuits_by_interface, expected_result)
+ 
++    def test_redeploy_evc(self):
++        """Test endpoint to redeploy an EVC."""
++        evc1 = MagicMock()
++        evc1.is_enabled.return_value = True
++        self.napp.circuits = {'1': evc1,
++                              '2': MagicMock()}
++        api = self.get_app_test_client(self.napp)
++        url = f'{self.server_name_url}/v2/evc/1/redeploy'
++        response = api.patch(url)
++        self.assertEqual(response.status_code, 202, response.data)
++
++    def test_redeploy_evc_disabled(self):
++        """Test endpoint to redeploy an EVC."""
++        evc1 = MagicMock()
++        evc1.is_enabled.return_value = False
++        self.napp.circuits = {'1': evc1,
++                              '2': MagicMock()}
++        api = self.get_app_test_client(self.napp)
++        url = f'{self.server_name_url}/v2/evc/1/redeploy'
++        response = api.patch(url)
++        self.assertEqual(response.status_code, 409, response.data)
++
++    def test_redeploy_evc_deleted(self):
++        """Test endpoint to redeploy an EVC."""
++        evc1 = MagicMock()
++        evc1.is_enabled.return_value = True
++        self.napp.circuits = {'1': evc1,
++                              '2': MagicMock()}
++        api = self.get_app_test_client(self.napp)
++        url = f'{self.server_name_url}/v2/evc/3/redeploy'
++        response = api.patch(url)
++        self.assertEqual(response.status_code, 404, response.data)
++
+     def test_list_schedules__no_data(self):
+         """Test list of schedules."""
+         api = self.get_app_test_client(self.napp)
+
+From e0945521e2a469f4c0d683a02cc1080bbf727d7c Mon Sep 17 00:00:00 2001
+From: Antonio Francisco <ajoaoff@gmail.com>
+Date: Thu, 12 Aug 2021 18:23:56 -0300
+Subject: [PATCH 4/4] Fix linter issues
+
+---
+ main.py | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/main.py b/main.py
+index d5cbba4..3390a86 100644
+--- a/main.py
++++ b/main.py
+@@ -273,8 +273,7 @@ def delete_circuit(self, circuit_id):
+ 
+     @rest('/v2/evc/<circuit_id>/redeploy', methods=['PATCH'])
+     def redeploy(self, circuit_id):
+-        """Endpoint to force the redeployment of an EVC
+-        """
++        """Endpoint to force the redeployment of an EVC."""
+         log.debug('redeploy /v2/evc/%s/redeploy', circuit_id)
+         try:
+             evc = self.circuits[circuit_id]

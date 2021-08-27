@@ -1,26 +1,84 @@
-From 8f3f86200cfc9a0cc5f2e33d1954206b7016e9e4 Mon Sep 17 00:00:00 2001
+From 841787d44d88e2e60171c755876e833974b56d3e Mon Sep 17 00:00:00 2001
 From: Italo Valcy <italo@ampath.net>
-Date: Mon, 7 Jun 2021 10:13:24 -0400
-Subject: [PATCH 1/5] changing the restore topology routine to load the
- switches, interfaces and links on Kytos startup
+Date: Fri, 27 Aug 2021 11:17:57 -0300
+Subject: [PATCH 1/5] Using Lock to avoid race conditions when saving the
+ topology status
 
 ---
- main.py | 199 ++++++++++++++++++++++----------------------------------
- 1 file changed, 79 insertions(+), 120 deletions(-)
+ main.py | 28 +++++++++++++++++-----------
+ 1 file changed, 17 insertions(+), 11 deletions(-)
 
 diff --git a/main.py b/main.py
-index 70c7f28..85f0c3d 100644
+index 6f88e29..89ae8db 100644
 --- a/main.py
 +++ b/main.py
 @@ -3,6 +3,7 @@
  Manage the network topology
  """
  import time
-+from datetime import datetime, timezone
++from threading import Lock
  
  from flask import jsonify, request
  from werkzeug.exceptions import BadRequest, UnsupportedMediaType
-@@ -19,8 +20,6 @@
+@@ -48,9 +49,13 @@ def setup(self):
+ 
+         self.storehouse = StoreHouse(self.controller)
+ 
++        self._lock = Lock()
++
++    @listen_to('kytos/storehouse.loaded')
+     def execute(self):
+         """Execute once when the napp is running."""
+-        self._load_network_status()
++        with self._lock:
++            self._load_network_status()
+ 
+     def shutdown(self):
+         """Do nothing."""
+@@ -708,16 +713,17 @@ def add_links(self, event):
+     @listen_to('.*.network_status.updated')
+     def save_status_on_storehouse(self, event=None):
+         """Save the network administrative status using storehouse."""
+-        status = self._get_switches_dict()
+-        status['id'] = 'network_status'
+-        if event:
+-            content = event.content
+-            log.info(f"Storing the administrative state of the"
+-                     f" {content['attribute']} attribute to"
+-                     f" {content['state']} in the interfaces"
+-                     f" {content['interface_ids']}")
+-        status.update(self._get_links_dict())
+-        self.storehouse.save_status(status)
++        with self._lock:
++            status = self._get_switches_dict()
++            status['id'] = 'network_status'
++            if event:
++                content = event.content
++                log.info(f"Storing the administrative state of the"
++                         f" {content['attribute']} attribute to"
++                         f" {content['state']} in the interfaces"
++                         f" {content['interface_ids']}")
++            status.update(self._get_links_dict())
++            self.storehouse.save_status(status)
+ 
+     def notify_switch_enabled(self, dpid):
+         """Send an event to notify that a switch is enabled."""
+
+From 49058619cf7d0358364e85e9a057a79731dcdc40 Mon Sep 17 00:00:00 2001
+From: Italo Valcy <italo@ampath.net>
+Date: Fri, 27 Aug 2021 11:19:04 -0300
+Subject: [PATCH 2/5] refactoring the restore topology routing to load on Kytos
+ startup
+
+---
+ main.py | 191 +++++++++++++++++++++++---------------------------------
+ 1 file changed, 77 insertions(+), 114 deletions(-)
+
+diff --git a/main.py b/main.py
+index 89ae8db..28b8a3a 100644
+--- a/main.py
++++ b/main.py
+@@ -20,8 +20,6 @@
  from napps.kytos.topology.storehouse import StoreHouse
  
  DEFAULT_LINK_UP_TIMER = 10
@@ -29,7 +87,7 @@ index 70c7f28..85f0c3d 100644
  
  
  class Main(KytosNApp):  # pylint: disable=too-many-public-methods
-@@ -33,14 +32,8 @@ def setup(self):
+@@ -34,14 +32,8 @@ def setup(self):
          """Initialize the NApp's links list."""
          self.links = {}
          self.store_items = {}
@@ -44,7 +102,7 @@ index 70c7f28..85f0c3d 100644
  
          self.verify_storehouse('switches')
          self.verify_storehouse('interfaces')
-@@ -121,94 +114,67 @@ def _get_link_from_interface(self, interface):
+@@ -126,94 +118,74 @@ def _get_link_from_interface(self, interface):
                  return link
          return None
  
@@ -56,8 +114,15 @@ index 70c7f28..85f0c3d 100644
 -            error = (f'The link {link_id} has no stored '
 -                     'administrative state to be restored.')
 -            raise RestoreError(error)
--
--        try:
++    def _load_link(self, link_att):
++        dpid_a = link_att['endpoint_a']['switch']
++        dpid_b = link_att['endpoint_b']['switch']
++        port_a = link_att['endpoint_a']['port_number']
++        port_b = link_att['endpoint_b']['port_number']
++        link_str = f'{dpid_a}:{port_a}-{dpid_b}:{port_b}'
++        log.info(f'Loading link from storehouse {link_str}')
+ 
+         try:
 -            link = self.links[link_id]
 -            if state['enabled']:
 -                link.enable()
@@ -66,12 +131,18 @@ index 70c7f28..85f0c3d 100644
 -        except KeyError:
 -            error = ('Error restoring link status.'
 -                     f'The link {link_id} does not exist.')
--            raise RestoreError(error)
++            switch_a = self.controller.switches[dpid_a]
++            switch_b = self.controller.switches[dpid_b]
++            interface_a = switch_a.interfaces[port_a]
++            interface_b = switch_b.interfaces[port_b]
++        except Exception as err:
++            error = f'Fail to load endpoints for link {link_str}: {err}'
+             raise RestoreError(error)
 -        log.info(f'The state of link {link.id} has been restored.')
 -        self.notify_topology_update()
 -        self.update_instance_metadata(link)
--        self.notify_link_status_change(link)
--
+-        self.notify_link_status_change(link, reason='from storehouse')
+ 
 -    def _restore_switch(self, switch_id):
 -        """Restore switch's administrative state from storehouse."""
 -        try:
@@ -80,7 +151,8 @@ index 70c7f28..85f0c3d 100644
 -            error = (f'The switch {switch_id} has no stored'
 -                     ' administrative state to be restored.')
 -            raise RestoreError(error)
--
++        link = self._get_link_or_create(interface_a, interface_b)
+ 
 -        try:
 -            switch = self.controller.switches[switch_id]
 -        except KeyError:
@@ -88,14 +160,21 @@ index 70c7f28..85f0c3d 100644
 -            error = ('Error while restoring switches status. The '
 -                     f'switch {switch_id} does not exist.')
 -            raise RestoreError(error)
--
++        if link_att['enabled']:
++            link.enable()
++        else:
++            link.disable()
+ 
 -        if state:
++        interface_a.update_link(link)
++        interface_b.update_link(link)
++        interface_a.nni = True
++        interface_b.nni = True
++        self.update_instance_metadata(link)
++
 +    def _load_switch(self, switch_id, switch_att):
 +        log.info(f'Loading switch from storehouse dpid={switch_id}')
-+        switch = Switch(dpid=switch_id)
-+        self.controller.add_new_switch(switch)
-+        # workaround so switch.is_active() returns False
-+        switch.lastseen = datetime(1, 1, 1, 0, 0, 0, 0, timezone.utc)
++        switch = self.controller.get_switch_or_create(switch_id)
 +        if switch_att['enabled']:
              switch.enable()
 -            self.notify_switch_enabled(switch_id)
@@ -134,65 +213,45 @@ index 70c7f28..85f0c3d 100644
 -                log.error('Error restoring interface status: '
 -                          '%s does not exist.', iface_id)
 -                continue
--
--            if iface_status:
 +        switch.description['manufacturer'] = switch_att.get('manufacturer', '')
 +        switch.description['hardware'] = switch_att.get('hardware', '')
 +        switch.description['software'] = switch_att.get('software')
 +        switch.description['serial'] = switch_att.get('serial', '')
 +        switch.description['data_path'] = switch_att.get('data_path', '')
 +        self.update_instance_metadata(switch)
+ 
+-            if iface_status:
 +        for iface_id, iface_att in switch_att.get('interfaces', {}).items():
 +            log.info(f'Loading interface iface_id={iface_id}')
-+            interface = Interface(name=iface_att['name'],
-+                                  port_number=iface_att['port_number'],
-+                                  address=iface_att.get('mac', None),
-+                                  speed=iface_att.get('speed', None),
-+                                  switch=switch)
-+            interface.deactivate()
++            interface = switch.update_or_create_interface(
++                            port_no=iface_att['port_number'],
++                            name=iface_att['name'],
++                            address=iface_att.get('mac', None),
++                            speed=iface_att.get('speed', None))
 +            if iface_att['enabled']:
                  interface.enable()
              else:
                  interface.disable()
 -            interface.lldp = lldp_status
 +            interface.lldp = iface_att['lldp']
-+            switch.update_interface(interface)
              self.update_instance_metadata(interface)
- 
+-
 -        log.info(f'The state of switch {switch_id} has been restored.')
-+    def _load_link(self, link_att):
-+        dpid_a = link_att['endpoint_a']['switch']
-+        dpid_b = link_att['endpoint_b']['switch']
-+        port_a = link_att['endpoint_a']['port_number']
-+        port_b = link_att['endpoint_b']['port_number']
-+        link_str = f'{dpid_a}:{port_a}-{dpid_b}:{port_b}'
-+        log.info(f'Loading link from storehouse {link_str}')
-+
-+        try:
-+            switch_a = self.controller.switches[dpid_a]
-+            switch_b = self.controller.switches[dpid_b]
-+            interface_a = switch_a.interfaces[port_a]
-+            interface_b = switch_b.interfaces[port_b]
-+        except Exception as err:
-+            error = f'Fail to load endpoints for link {link_str}: {err}'
-+            raise RestoreError(error)
-+
-+        link = self._get_link_or_create(interface_a, interface_b)
-+
-+        if link_att['enabled']:
-+            link.enable()
-+        else:
-+            link.disable()
-+
-+        interface_a.update_link(link)
-+        interface_b.update_link(link)
-+        interface_a.nni = True
-+        interface_b.nni = True
-+        self.update_instance_metadata(link)
++            name = 'kytos/topology.port.created'
++            event = KytosEvent(name=name, content={
++                                              'switch': switch_id,
++                                              'port': interface.port_number,
++                                              'port_description': {
++                                                  'alias': interface.name,
++                                                  'mac': interface.address,
++                                                  'state': interface.state
++                                                  }
++                                              })
++            self.controller.buffers.app.put(event)
  
      # pylint: disable=attribute-defined-outside-init
      def _load_network_status(self):
-@@ -216,26 +182,33 @@ def _load_network_status(self):
+@@ -221,26 +193,31 @@ def _load_network_status(self):
          try:
              status = self.storehouse.get_data()
          except FileNotFoundError as error:
@@ -226,25 +285,23 @@ index 70c7f28..85f0c3d 100644
 +
 +        log.debug("_load_network_status switches=%s" % switches)
 +        for switch_id, switch_att in switches.items():
-+            if switch_id not in self.controller.switches:
-+                try:
-+                    self._load_switch(switch_id, switch_att)
-+                # pylint: disable=broad-except
-+                except Exception as err:
-+                    log.error(f'Error loading switch: {err}')
++            try:
++                self._load_switch(switch_id, switch_att)
++            # pylint: disable=broad-except
++            except Exception as err:
++                log.error(f'Error loading switch: {err}')
 +
 +        log.debug("_load_network_status links=%s" % links)
 +        for link_id, link_att in links.items():
-+            if link_id not in self.links:
-+                try:
-+                    self._load_link(link_att)
-+                # pylint: disable=broad-except
-+                except Exception as err:
-+                    log.error(f'Error loading link: {err}')
++            try:
++                self._load_link(link_att)
++            # pylint: disable=broad-except
++            except Exception as err:
++                log.error(f'Error loading link {link_id}: {err}')
  
      @rest('v3/')
      def get_topology(self):
-@@ -245,18 +218,6 @@ def get_topology(self):
+@@ -250,18 +227,6 @@ def get_topology(self):
          """
          return jsonify(self._get_topology_dict())
  
@@ -263,7 +320,7 @@ index 70c7f28..85f0c3d 100644
      # Switch related methods
      @rest('v3/switches')
      def get_switches(self):
-@@ -535,7 +496,6 @@ def handle_new_switch(self, event):
+@@ -546,7 +511,6 @@ def handle_new_switch(self, event):
          log.debug('Switch %s added to the Topology.', switch.id)
          self.notify_topology_update()
          self.update_instance_metadata(switch)
@@ -271,7 +328,7 @@ index 70c7f28..85f0c3d 100644
          if switch.is_enabled():
              self.notify_switch_enabled(switch.id)
  
-@@ -679,7 +639,6 @@ def add_links(self, event):
+@@ -690,7 +654,6 @@ def add_links(self, event):
          interface_b.nni = True
  
          self.notify_topology_update()
@@ -280,15 +337,14 @@ index 70c7f28..85f0c3d 100644
      # def add_host(self, event):
      #    """Update the topology with a new Host."""
 
-From 5dfdc0bb2d7c46cc53bb43ababc37d4fa2e446c6 Mon Sep 17 00:00:00 2001
+From 7e535f1c45812b04279bb4d154af857f68150d47 Mon Sep 17 00:00:00 2001
 From: Italo Valcy <italo@ampath.net>
-Date: Tue, 8 Jun 2021 22:47:50 -0400
-Subject: [PATCH 2/5] cleaning up settings and adjusting unit tests
+Date: Fri, 27 Aug 2021 11:19:21 -0300
+Subject: [PATCH 3/5] clean settings
 
 ---
- settings.py             |   2 -
- tests/unit/test_main.py | 398 ++++++++++++++++++++++++++++++----------
- 2 files changed, 305 insertions(+), 95 deletions(-)
+ settings.py | 2 --
+ 1 file changed, 2 deletions(-)
 
 diff --git a/settings.py b/settings.py
 index f756511..290b26d 100644
@@ -300,11 +356,29 @@ index f756511..290b26d 100644
  BOX_RESTORE_TIMER = 0.1
 -# Time (in seconds) to wait before restore interfaces
 -INTERFACE_RESTORE_TIMER = 2
+
+From 8951b6d7d336093b8ca2beb6a6f088777985a606 Mon Sep 17 00:00:00 2001
+From: Italo Valcy <italo@ampath.net>
+Date: Fri, 27 Aug 2021 11:19:32 -0300
+Subject: [PATCH 4/5] adjusting unit tests
+
+---
+ tests/unit/test_main.py | 405 +++++++++++++++++++++++++++++++---------
+ 1 file changed, 312 insertions(+), 93 deletions(-)
+
 diff --git a/tests/unit/test_main.py b/tests/unit/test_main.py
-index 7d98502..3bd7704 100644
+index 482b777..92639a7 100644
 --- a/tests/unit/test_main.py
 +++ b/tests/unit/test_main.py
-@@ -190,138 +190,350 @@ def test_get_topology(self):
+@@ -41,6 +41,7 @@ def test_get_event_listeners(self):
+                            'kytos/maintenance.end_link',
+                            'kytos/maintenance.start_switch',
+                            'kytos/maintenance.end_switch',
++                           'kytos/storehouse.loaded',
+                            '.*.network_status.updated',
+                            '.*.interface.is.nni',
+                            '.*.connection.lost',
+@@ -190,138 +191,356 @@ def test_get_topology(self):
      @patch('napps.kytos.topology.main.StoreHouse.get_data')
      def test_load_network_status(self, mock_storehouse_get_data):
          """Test _load_network_status."""
@@ -338,15 +412,12 @@ index 7d98502..3bd7704 100644
 -                        'dpid': '00:00:00:00:00:00:00:01',
 +                    dpid_a: {
 +                        'dpid': dpid_a,
-                         'enabled': True,
--                        'id': '00:00:00:00:00:00:00:01',
++                        'enabled': True,
 +                        'id': dpid_a,
-                         'interfaces': {
--                            '00:00:00:00:00:00:00:01:1': {
++                        'interfaces': {
 +                            f'{dpid_a}:2': {
-                                 'enabled': True,
-                                 'lldp': True,
--                                'id': '00:00:00:00:00:00:00:00:1',
++                                'enabled': True,
++                                'lldp': True,
 +                                'port_number': 2,
 +                                'name': 's1-eth2'
 +                            }
@@ -354,12 +425,15 @@ index 7d98502..3bd7704 100644
 +                    },
 +                    dpid_b: {
 +                        'dpid': dpid_b,
-+                        'enabled': True,
+                         'enabled': True,
+-                        'id': '00:00:00:00:00:00:00:01',
 +                        'id': dpid_b,
-+                        'interfaces': {
+                         'interfaces': {
+-                            '00:00:00:00:00:00:00:01:1': {
 +                            f'{dpid_b}:2': {
-+                                'enabled': True,
-+                                'lldp': True,
+                                 'enabled': True,
+                                 'lldp': True,
+-                                'id': '00:00:00:00:00:00:00:00:1',
 +                                'port_number': 2,
 +                                'name': 's2-eth2'
                              }
@@ -485,8 +559,11 @@ index 7d98502..3bd7704 100644
 +        error = 'Error loading link: xpto'
 +        mock_log.error.assert_called_with(error)
 +
-+    def test_load_switch(self):
++    @patch('napps.kytos.topology.main.KytosEvent')
++    @patch('kytos.core.buffers.KytosEventBuffer.put')
++    def test_load_switch(self, *args):
 +        """Test _load_switch."""
++        (mock_buffers_put, mock_event) = args
 +        dpid_a = "00:00:00:00:00:00:00:01"
 +        dpid_x = "00:00:00:00:00:00:00:XX"
 +        iface_a = f'{dpid_a}:1'
@@ -520,6 +597,9 @@ index 7d98502..3bd7704 100644
 +        self.assertEqual(len(switch.interfaces), 1)
 +        self.assertIn(1, switch.interfaces)
 +        self.assertNotIn(2, switch.interfaces)
++        mock_event.assert_called()
++        mock_buffers_put.assert_called()
++
 +        interface = switch.interfaces[1]
 +        self.assertEqual(interface.id, iface_a)
 +        self.assertEqual(interface.switch.id, dpid_a)
@@ -654,12 +734,6 @@ index 7d98502..3bd7704 100644
 -        # enable link
 -        self.napp.restore_network_status(mock_link)
 -        self.assertEqual(mock_link.enable.call_count, 1)
--
--        # disable link
--        self.napp.links_state = {link_id: {"enabled": False}}
--        self.napp._verified_links = []
--        self.napp.restore_network_status(mock_link)
--        self.assertEqual(mock_link.disable.call_count, 1)
 +        with patch('napps.kytos.topology.main.Main._get_link_or_create',
 +                   return_value=mock_link):
 +            # enable link
@@ -673,6 +747,12 @@ index 7d98502..3bd7704 100644
 +            self.napp._load_link(link_attrs)
 +            self.assertEqual(mock_link.disable.call_count, 1)
  
+-        # disable link
+-        self.napp.links_state = {link_id: {"enabled": False}}
+-        self.napp._verified_links = []
+-        self.napp.restore_network_status(mock_link)
+-        self.assertEqual(mock_link.disable.call_count, 1)
+-
 -    def test_fail_restore_link(self):
 -        """Test fail restore_link."""
 -        dpid = '00:00:00:00:00:00:00:01'
@@ -749,235 +829,41 @@ index 7d98502..3bd7704 100644
      @patch('napps.kytos.topology.main.Main.save_status_on_storehouse')
      def test_enable_switch(self, mock_save_status):
 
-From 507c0da207800bae05a9ffc2713b9f531db7ec29 Mon Sep 17 00:00:00 2001
+From 6006bacd36eef7a1cbccd31433cd14c9b1763210 Mon Sep 17 00:00:00 2001
 From: Italo Valcy <italo@ampath.net>
-Date: Fri, 11 Jun 2021 22:00:39 -0400
-Subject: [PATCH 3/5] saving the topology when elements are added and using
- Lock to avoid race conditions
+Date: Fri, 27 Aug 2021 11:30:56 -0300
+Subject: [PATCH 5/5] adjusting unit tests
 
 ---
- main.py                 | 38 ++++++++++++++++++++++++++++----------
- tests/unit/test_main.py | 23 +++++++++++++++++++----
- 2 files changed, 47 insertions(+), 14 deletions(-)
+ tests/unit/test_main.py | 4 +---
+ 1 file changed, 1 insertion(+), 3 deletions(-)
 
-diff --git a/main.py b/main.py
-index 85f0c3d..581bb3a 100644
---- a/main.py
-+++ b/main.py
-@@ -4,6 +4,7 @@
- """
- import time
- from datetime import datetime, timezone
-+from threading import Lock
- 
- from flask import jsonify, request
- from werkzeug.exceptions import BadRequest, UnsupportedMediaType
-@@ -41,6 +42,8 @@ def setup(self):
- 
-         self.storehouse = StoreHouse(self.controller)
- 
-+        self._lock = Lock()
-+
-     def execute(self):
-         """Execute once when the napp is running."""
-         self._load_network_status()
-@@ -145,6 +148,17 @@ def _load_switch(self, switch_id, switch_att):
-             interface.lldp = iface_att['lldp']
-             switch.update_interface(interface)
-             self.update_instance_metadata(interface)
-+            name = 'kytos/topology.port.created'
-+            event = KytosEvent(name=name, content={
-+                                              'switch': switch_id,
-+                                              'port': interface.port_number,
-+                                              'port_description': {
-+                                                  'alias': interface.name,
-+                                                  'mac': interface.address,
-+                                                  'state': interface.state
-+                                                  }
-+                                              })
-+            self.controller.buffers.app.put(event)
- 
-     def _load_link(self, link_att):
-         dpid_a = link_att['endpoint_a']['switch']
-@@ -494,6 +508,7 @@ def handle_new_switch(self, event):
-         switch = event.content['switch']
-         switch.activate()
-         log.debug('Switch %s added to the Topology.', switch.id)
-+        self.save_status_on_storehouse()
-         self.notify_topology_update()
-         self.update_instance_metadata(switch)
-         if switch.is_enabled():
-@@ -526,6 +541,7 @@ def handle_interface_up(self, event):
-     def handle_interface_created(self, event):
-         """Update the topology based on a Port Create event."""
-         self.handle_interface_up(event)
-+        self.save_status_on_storehouse()
- 
-     def handle_interface_down(self, event):
-         """Update the topology based on a Port Modify event.
-@@ -639,6 +655,7 @@ def add_links(self, event):
-         interface_b.nni = True
- 
-         self.notify_topology_update()
-+        self.save_status_on_storehouse()
- 
-     # def add_host(self, event):
-     #    """Update the topology with a new Host."""
-@@ -661,16 +678,17 @@ def add_links(self, event):
-     @listen_to('.*.network_status.updated')
-     def save_status_on_storehouse(self, event=None):
-         """Save the network administrative status using storehouse."""
--        status = self._get_switches_dict()
--        status['id'] = 'network_status'
--        if event:
--            content = event.content
--            log.info(f"Storing the administrative state of the"
--                     f" {content['attribute']} attribute to"
--                     f" {content['state']} in the interfaces"
--                     f" {content['interface_ids']}")
--        status.update(self._get_links_dict())
--        self.storehouse.save_status(status)
-+        with self._lock:
-+            status = self._get_switches_dict()
-+            status['id'] = 'network_status'
-+            if event:
-+                content = event.content
-+                log.info(f"Storing the administrative state of the"
-+                         f" {content['attribute']} attribute to"
-+                         f" {content['state']} in the interfaces"
-+                         f" {content['interface_ids']}")
-+            status.update(self._get_links_dict())
-+            self.storehouse.save_status(status)
- 
-     def notify_switch_enabled(self, dpid):
-         """Send an event to notify that a switch is enabled."""
 diff --git a/tests/unit/test_main.py b/tests/unit/test_main.py
-index 3bd7704..0aa9dbe 100644
+index 92639a7..1e372ed 100644
 --- a/tests/unit/test_main.py
 +++ b/tests/unit/test_main.py
-@@ -320,8 +320,11 @@ def test_load_network_status_fail_link(self, *args):
-         error = 'Error loading link: xpto'
+@@ -318,7 +318,7 @@ def test_load_network_status_fail_link(self, *args):
+         mock_get_data.return_value = status
+         mock_load_link.side_effect = Exception('xpto')
+         self.napp._load_network_status()
+-        error = 'Error loading link: xpto'
++        error = 'Error loading link 1: xpto'
          mock_log.error.assert_called_with(error)
  
--    def test_load_switch(self):
-+    @patch('napps.kytos.topology.main.KytosEvent')
-+    @patch('kytos.core.buffers.KytosEventBuffer.put')
-+    def test_load_switch(self, *args):
-         """Test _load_switch."""
-+        (mock_buffers_put, mock_event) = args
-         dpid_a = "00:00:00:00:00:00:00:01"
-         dpid_x = "00:00:00:00:00:00:00:XX"
-         iface_a = f'{dpid_a}:1'
-@@ -355,6 +358,9 @@ def test_load_switch(self):
-         self.assertEqual(len(switch.interfaces), 1)
-         self.assertIn(1, switch.interfaces)
-         self.assertNotIn(2, switch.interfaces)
-+        mock_event.assert_called()
-+        mock_buffers_put.assert_called()
-+
-         interface = switch.interfaces[1]
-         self.assertEqual(interface.id, iface_a)
+     @patch('napps.kytos.topology.main.KytosEvent')
+@@ -367,7 +367,6 @@ def test_load_switch(self, *args):
          self.assertEqual(interface.switch.id, dpid_a)
-@@ -992,9 +998,12 @@ def test_delete_link_metadata(self, mock_metadata_changes):
- 
-     @patch('napps.kytos.topology.main.Main.notify_topology_update')
-     @patch('napps.kytos.topology.main.Main.update_instance_metadata')
-+    @patch('napps.kytos.topology.main.StoreHouse.save_status')
-     def test_handle_new_switch(self, *args):
-         """Test handle_new_switch."""
--        (mock_instance_metadata, mock_notify_topology_update) = args
-+        (mock_instance_metadata, mock_notify_topology_update,
-+         mock_save_status) = args
-+        mock_save_status.return_value = True
-         mock_event = MagicMock()
-         mock_switch = create_autospec(Switch)
-         mock_event.content['switch'] = mock_switch
-@@ -1025,8 +1034,11 @@ def test_handle_interface_up(self, *args):
-         mock_instance_metadata.assert_called()
- 
-     @patch('napps.kytos.topology.main.Main.handle_interface_up')
--    def test_handle_interface_created(self, mock_handle_interface_up):
-+    @patch('napps.kytos.topology.main.StoreHouse.save_status')
-+    def test_handle_interface_created(self, *args):
-         """Test handle interface created."""
-+        (mock_handle_interface_up, mock_save_status) = args
-+        mock_save_status.return_value = True
-         mock_event = MagicMock()
-         self.napp.handle_interface_created(mock_event)
-         mock_handle_interface_up.assert_called()
-@@ -1099,9 +1111,12 @@ def test_interface_link_down(self, *args):
- 
-     @patch('napps.kytos.topology.main.Main._get_link_or_create')
-     @patch('napps.kytos.topology.main.Main.notify_topology_update')
-+    @patch('napps.kytos.topology.main.StoreHouse.save_status')
-     def test_add_links(self, *args):
-         """Test add_links."""
--        (mock_notify_topology_update, mock_get_link_or_create) = args
-+        (mock_notify_topology_update, mock_get_link_or_create,
-+         mock_save_status) = args
-+        mock_save_status.return_value = True
-         mock_event = MagicMock()
-         self.napp.add_links(mock_event)
-         mock_get_link_or_create.assert_called()
-
-From d0395236816de429e57127ea23cba8078d76bb03 Mon Sep 17 00:00:00 2001
-From: Italo Valcy <italo@ampath.net>
-Date: Tue, 6 Jul 2021 10:15:59 -0400
-Subject: [PATCH 4/5] loading network status when storehouse is load (which can
- happens before the topology)
-
----
- main.py | 4 +++-
- 1 file changed, 3 insertions(+), 1 deletion(-)
-
-diff --git a/main.py b/main.py
-index 581bb3a..fe9b4fd 100644
---- a/main.py
-+++ b/main.py
-@@ -44,9 +44,11 @@ def setup(self):
- 
-         self._lock = Lock()
- 
-+    @listen_to('kytos/storehouse.loaded')
-     def execute(self):
-         """Execute once when the napp is running."""
--        self._load_network_status()
-+        with self._lock:
-+            self._load_network_status()
- 
-     def shutdown(self):
-         """Do nothing."""
-
-From 0ed7631043015b0aa1f0674dc0d88ea8c1c1b824 Mon Sep 17 00:00:00 2001
-From: Italo Valcy <italo@ampath.net>
-Date: Tue, 6 Jul 2021 10:17:16 -0400
-Subject: [PATCH 5/5] saving topology status only when a new link is discovered
- (instead of every event from of_lldp)
-
----
- main.py | 8 +++++++-
- 1 file changed, 7 insertions(+), 1 deletion(-)
-
-diff --git a/main.py b/main.py
-index fe9b4fd..ee0569d 100644
---- a/main.py
-+++ b/main.py
-@@ -645,11 +645,17 @@ def add_links(self, event):
-         interface_b = event.content['interface_b']
- 
-         try:
--            link = self._get_link_or_create(interface_a, interface_b)
-+            link = Link(interface_a, interface_b)
-         except KytosLinkCreationError as err:
-             log.error(f'Error creating link: {err}.')
-             return
- 
-+        if link.id in self.links:
-+            log.debug(f'Already existing link id={link.id}')
-+            return
-+
-+        self.links[link.id] = link
-+
-         interface_a.update_link(link)
-         interface_b.update_link(link)
- 
+         self.assertEqual(interface.port_number, 1)
+         self.assertTrue(interface.is_enabled())
+-        self.assertFalse(interface.is_active())
+         self.assertTrue(interface.lldp)
+         self.assertTrue(interface.uni)
+         self.assertFalse(interface.nni)
+@@ -437,7 +436,6 @@ def test_load_switch_attrs(self):
+         self.assertEqual(interface.switch.id, dpid_b)
+         self.assertEqual(interface.port_number, 1)
+         self.assertFalse(interface.is_enabled())
+-        self.assertFalse(interface.is_active())
+         self.assertFalse(interface.lldp)
+         self.assertTrue(interface.uni)
+         self.assertFalse(interface.nni)
