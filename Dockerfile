@@ -3,7 +3,7 @@ MAINTAINER Italo Valcy <italovalcy@gmail.com>
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
 	python3-setuptools python3-pip rsyslog iproute2 procps curl jq git-core patch \
-        openvswitch-switch mininet iputils-ping vim screen less \
+        openvswitch-switch mininet iputils-ping vim tmux less \
         python-pytest python-requests python-mock python-pytest-timeout \
 	&& apt-get clean \
 	&& rm -rf /var/lib/apt/lists/*

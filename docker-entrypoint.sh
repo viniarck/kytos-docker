@@ -21,8 +21,8 @@ test -x /usr/sbin/ovs-vswitchd && service openvswitch-switch start
 # If first argument looks like an argument then execute mininet with all the
 # arguments
 if [ $# -eq 0 ] || [[ "$1" =~ ^- ]]; then
-  echo -n "Starting Kytos controller with args: "
-  kytosd $@ &
+  echo -n "Starting Kytos controller in a tmux session with args: "
+  tmux new-session -d -s kytosserver "kytosd -f $@"
   echo "done"
   echo "Leaving tail -f /dev/null running.."
   tail -f /dev/null
@@ -33,8 +33,8 @@ elif [[ "$1" =~ ^/ ]]; then
 
 # execute argument + kytosd
 else
-  echo -n "Starting Kytos controller: "
-  kytosd &
+  echo -n "Starting Kytos controller in a tmux session: "
+  tmux new-session -d -s kytosserver "kytosd -f"
   echo "done"
   exec "$@"
 fi
