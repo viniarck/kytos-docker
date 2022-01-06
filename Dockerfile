@@ -19,16 +19,16 @@ RUN python3 -m pip install https://github.com/kytos-ng/python-openflow/archive/m
 RUN python3 -m pip install https://github.com/kytos-ng/kytos-utils/archive/master.zip
 RUN python3 -m pip install https://github.com/kytos-ng/kytos/archive/master.zip
 
-RUN python3 -m pip install -e git+https://github.com/kytos-ng/storehouse#egg=kytos-storehouse
+RUN python3 -m pip install -e git+https://github.com/kytos-ng/storehouse@fix/install_req_deps#egg=kytos-storehouse
 RUN python3 -m pip install -e git+https://github.com/kytos-ng/of_core#egg=kytos-of_core
 RUN python3 -m pip install -e git+https://github.com/kytos-ng/flow_manager#egg=kytos-flow_manager
 RUN python3 -m pip install -e git+https://github.com/kytos-ng/topology#egg=kytos-topology
 RUN python3 -m pip install -e git+https://github.com/kytos-ng/of_lldp#egg=kytos-of_lldp
-RUN python3 -m pip install -e git+https://github.com/kytos-ng/pathfinder#egg=kytos-pathfinder
-RUN python3 -m pip install -e git+https://github.com/kytos-ng/mef_eline#egg=kytos-mef_eline
+RUN python3 -m pip install -e git+https://github.com/kytos-ng/pathfinder@fix/install_req_deps#egg=kytos-pathfinder
+RUN python3 -m pip install -e git+https://github.com/kytos-ng/mef_eline@fix/install_req_deps#egg=kytos-mef_eline
 RUN python3 -m pip install -e git+https://github.com/kytos-ng/maintenance#egg=kytos-maintenance
-RUN python3 -m pip install -e git+https://github.com/amlight/coloring#egg=amlight-coloring
-RUN python3 -m pip install -e git+https://github.com/amlight/sdntrace#egg=amlight-sdntrace
+RUN python3 -m pip install -e git+https://github.com/amlight/coloring@fix/install_req_deps#egg=amlight-coloring
+RUN python3 -m pip install -e git+https://github.com/amlight/sdntrace@fix/install_req_deps#egg=amlight-sdntrace
 
 # disable sdntrace and coloring by default, you can enable them again by running:
 # 	kytos napps enable amlight/coloring
