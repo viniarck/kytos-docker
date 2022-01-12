@@ -4,6 +4,20 @@
 
 **NOTE: Since Kytos project is in a "shutdown" phase, our docker image is based on the fork of the project - Kytos-NG (https://github.com/kytos-ng). The naming convention inside the docker image remains the same, but eventually they will be changed to kytos-ng in the future.**
 
+## Build
+
+You can build the docker image by just running:
+
+       docker build -f Dockerfile --no-cache -t amlight/kytos .
+
+You can also use some build arguments to specify which branch should be used on each component (core and Napps):
+
+       docker build -f Dockerfile --build-arg branch_mef_eline=fix/issue_xpto --build-arg branch_kytos_utils=fix/error_foobar -t amlight/kytos .
+
+When running in a CI/CD with environment variables:
+
+       env | grep ^branch_ | sed -e 's/^/--build-arg /' | xargs docker build -f Dockerfile --no-cache -t amlight/kytos .
+
 ## Usage
 
 After pull or build the image, you can run:
