@@ -51,11 +51,14 @@ RUN python3 -m pip install -e git+https://github.com/kytos-ng/storehouse@${branc
  && python3 -m pip install -e git+https://github.com/amlight/flow_stats@${branch_flow_stats}#egg=amlight-flow_stats \
  && python3 -m pip install -e git+https://github.com/amlight/sdntrace_cp@${branch_sdntrace_cp}#egg=amlight-sdntrace_cp
 
-# disable sdntrace and coloring by default, you can enable them again by running:
-# 	kytos napps enable amlight/coloring
+# disable sdntrace and sdntrace_cp by default (along with their deps), you can enable them again by running:
 #	kytos napps enable amlight/sdntrace
+# 	kytos napps enable amlight/sdntrace_cp
 RUN unlink /var/lib/kytos/napps/amlight/coloring
 RUN unlink /var/lib/kytos/napps/amlight/sdntrace
+RUN unlink /var/lib/kytos/napps/amlight/scheduler
+RUN unlink /var/lib/kytos/napps/amlight/flow_stats
+RUN unlink /var/lib/kytos/napps/amlight/sdntrace_cp
 
 COPY ./apply-patches.sh  /tmp/
 COPY ./patches /tmp/patches
