@@ -1,4 +1,4 @@
-FROM debian:buster-slim
+FROM debian:bullseye-slim
 MAINTAINER Italo Valcy <italovalcy@gmail.com>
 
 ARG branch_python_openflow=master
@@ -18,7 +18,6 @@ ARG branch_sdntrace=master
 RUN apt-get update && apt-get install -y --no-install-recommends \
 	python3-setuptools python3-pip rsyslog iproute2 procps curl jq git-core patch \
         openvswitch-switch mininet iputils-ping vim tmux less \
-        python-pytest python-requests python-mock python-pytest-timeout \
 	&& apt-get clean \
 	&& rm -rf /var/lib/apt/lists/*
 
@@ -44,6 +43,12 @@ RUN python3 -m pip install -e git+https://github.com/kytos-ng/storehouse@${branc
  && python3 -m pip install -e git+https://github.com/kytos-ng/maintenance@${branch_maintenance}#egg=kytos-maintenance \
  && python3 -m pip install -e git+https://github.com/amlight/coloring@${branch_coloring}#egg=amlight-coloring \
  && python3 -m pip install -e git+https://github.com/amlight/sdntrace@${branch_sdntrace}#egg=amlight-sdntrace
+
+# end-to-end python related dependencies
+RUN python3 -m pip install pytest-timeout==2.0.2 \
+ && python3 -m pip install pytest==6.2.5 \
+ && python3 -m pip install mock==4.0.3 \
+ && python3 -m pip install requests # resolve to same version as NApps
 
 # disable sdntrace and coloring by default, you can enable them again by running:
 # 	kytos napps enable amlight/coloring
