@@ -14,6 +14,9 @@ ARG branch_mef_eline=master
 ARG branch_maintenance=master
 ARG branch_coloring=master
 ARG branch_sdntrace=master
+ARG branch_scheduler=master
+ARG branch_flow_stats=master
+ARG branch_sdntrace_cp=master
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
 	python3-setuptools python3-pip rsyslog iproute2 procps curl jq git-core patch \
@@ -42,19 +45,16 @@ RUN python3 -m pip install -e git+https://github.com/kytos-ng/storehouse@${branc
  && python3 -m pip install -e git+https://github.com/kytos-ng/mef_eline@${branch_mef_eline}#egg=kytos-mef_eline \
  && python3 -m pip install -e git+https://github.com/kytos-ng/maintenance@${branch_maintenance}#egg=kytos-maintenance \
  && python3 -m pip install -e git+https://github.com/amlight/coloring@${branch_coloring}#egg=amlight-coloring \
- && python3 -m pip install -e git+https://github.com/amlight/sdntrace@${branch_sdntrace}#egg=amlight-sdntrace
+ && python3 -m pip install -e git+https://github.com/amlight/sdntrace@${branch_sdntrace}#egg=amlight-sdntrace \
+ && python3 -m pip install -e git+https://github.com/amlight/scheduler@${branch_scheduler}#egg=amlight-scheduler \
+ && python3 -m pip install -e git+https://github.com/amlight/flow_stats@${branch_flow_stats}#egg=amlight-flow_stats \
+ && python3 -m pip install -e git+https://github.com/amlight/sdntrace_cp@${branch_sdntrace_cp}#egg=amlight-sdntrace_cp
 
 # end-to-end python related dependencies
 RUN python3 -m pip install pytest-timeout==2.0.2 \
  && python3 -m pip install pytest==6.2.5 \
  && python3 -m pip install mock==4.0.3 \
  && python3 -m pip install requests # resolve to same version as NApps
-
-# disable sdntrace and coloring by default, you can enable them again by running:
-# 	kytos napps enable amlight/coloring
-#	kytos napps enable amlight/sdntrace
-RUN unlink /var/lib/kytos/napps/amlight/coloring
-RUN unlink /var/lib/kytos/napps/amlight/sdntrace
 
 COPY ./apply-patches.sh  /tmp/
 COPY ./patches /tmp/patches
