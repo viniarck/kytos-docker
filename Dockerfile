@@ -1,4 +1,4 @@
-FROM debian:buster-slim
+FROM debian:bullseye-slim
 MAINTAINER Italo Valcy <italovalcy@gmail.com>
 
 ARG branch_python_openflow=master
@@ -21,7 +21,6 @@ ARG branch_sdntrace_cp=master
 RUN apt-get update && apt-get install -y --no-install-recommends \
 	python3-setuptools python3-pip rsyslog iproute2 procps curl jq git-core patch \
         openvswitch-switch mininet iputils-ping vim tmux less \
-        python-pytest python-requests python-mock python-pytest-timeout \
 	&& apt-get clean \
 	&& rm -rf /var/lib/apt/lists/*
 
@@ -51,9 +50,14 @@ RUN python3 -m pip install -e git+https://github.com/kytos-ng/storehouse@${branc
  && python3 -m pip install -e git+https://github.com/amlight/flow_stats@${branch_flow_stats}#egg=amlight-flow_stats \
  && python3 -m pip install -e git+https://github.com/amlight/sdntrace_cp@${branch_sdntrace_cp}#egg=amlight-sdntrace_cp
 
+RUN python3 -m pip install pytest-timeout==2.0.2 \
+ && python3 -m pip install pytest==6.2.5 \
+ && python3 -m pip install mock==4.0.3 \
+ && python3 -m pip install requests # resolve to same version as NApps
+
 # disable sdntrace and sdntrace_cp by default (along with their deps), you can enable them again by running:
-#	kytos napps enable amlight/sdntrace
-# 	kytos napps enable amlight/sdntrace_cp
+#	  kytos napps enable amlight/sdntrace
+#   kytos napps enable amlight/sdntrace_cp
 RUN unlink /var/lib/kytos/napps/amlight/coloring
 RUN unlink /var/lib/kytos/napps/amlight/sdntrace
 RUN unlink /var/lib/kytos/napps/amlight/scheduler
