@@ -54,6 +54,7 @@ RUN python3 -m pip install -e git+https://github.com/kytos-ng/storehouse@${branc
 RUN python3 -m pip install pytest-timeout==2.0.2 \
  && python3 -m pip install pytest==6.2.5 \
  && python3 -m pip install mock==4.0.3 \
+ && python3 -m pip install pymongo==4.0.2 \
  && python3 -m pip install requests # resolve to same version as NApps
 
 COPY ./apply-patches.sh  /tmp/
